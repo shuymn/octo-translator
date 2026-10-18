@@ -17,7 +17,7 @@ function respond(status: number, body: unknown): typeof fetch {
 }
 
 describe("buildRequestBody", () => {
-  test("asks for JSON translations and no stored interaction", () => {
+  test("PRIV-3: asks for JSON translations and no stored interaction", () => {
     expect(buildRequestBody([{ kind: "paragraph", text: "a" }])).toMatchObject({
       model: MODEL,
       input: JSON.stringify({ segments: [{ kind: "paragraph", text: "a" }] }),
@@ -28,7 +28,7 @@ describe("buildRequestBody", () => {
 });
 
 describe("translateSegments", () => {
-  test("sends the key in a header and answers the translations", async () => {
+  test("KEY-2: sends the key in a header and answers the translations", async () => {
     const fetchFn = respond(200, interaction('{"translations":["修正","本文"]}'));
     await expect(
       translateSegments(
@@ -48,7 +48,7 @@ describe("translateSegments", () => {
     expect(new Headers(init?.headers).get("x-goog-api-key")).toBe("key");
   });
 
-  test("does not call the API without a key or with too much text", async () => {
+  test("RES-1: does not call the API without a key or with too much text", async () => {
     const fetchFn = respond(200, {});
     await expect(translateSegments([{ kind: "paragraph", text: "a" }], "", fetchFn)).resolves.toEqual({
       ok: false,

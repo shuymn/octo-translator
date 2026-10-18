@@ -14,7 +14,7 @@ function serialize(nodes: Node[]): string {
 }
 
 describe("extractSegments", () => {
-  test("marks kept and wrapped inline elements", () => {
+  test("PRIV-2: marks kept and wrapped inline elements", () => {
     const root = render(
       '<p>Fix <code>parse</code> in <a href="/docs">the docs</a>, thanks <a class="user-mention" href="/alice">@alice</a>.</p>',
     );
@@ -27,7 +27,7 @@ describe("extractSegments", () => {
     expect(extractSegments(root).map((segment) => segment.source)).toEqual(["First item", "Nested item"]);
   });
 
-  test("skips code blocks, highlighted blocks and text without letters", () => {
+  test("PRIV-2: skips code blocks, highlighted blocks and text without letters", () => {
     const root = render(
       '<pre><code>const x = 1;</code></pre><div class="highlight"><pre>let y</pre></div><p>1234</p><p><code>only code</code></p>',
     );
@@ -79,7 +79,7 @@ describe("buildTranslatedNodes", () => {
     expect(root.innerHTML).toBe('<p>Fix <code>parse</code> in <a href="/docs" class="x">the docs</a>.</p>');
   });
 
-  test("never parses the translation as HTML", () => {
+  test("DOM-1: never parses the translation as HTML", () => {
     const nodes = buildTranslatedNodes(segment, "<img src=x onerror=alert(1)> ⟦0⟧ ⟦1⟧<b>x</b>⟦/1⟧", document);
     expect(nodes?.some((node) => node.nodeName === "IMG")).toBe(false);
     expect(nodes && serialize(nodes)).toContain("&lt;img");
@@ -94,7 +94,7 @@ describe("buildTranslatedNodes", () => {
     ["a nested marker", "⟦1⟧x ⟦0⟧⟦/1⟧"],
     ["an empty translation", ""],
     ["markers without text", "⟦0⟧⟦1⟧ ⟦/1⟧"],
-  ])("rejects %s", (_, translation) => {
+  ])("DOM-1: rejects %s", (_, translation) => {
     expect(buildTranslatedNodes(segment, translation, document)).toBeUndefined();
   });
 

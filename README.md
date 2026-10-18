@@ -3,13 +3,14 @@
 A Chrome extension that translates the title and description of a GitHub pull request into Japanese with Gemini
 (`gemini-3.8-flash`), in place, keeping GitHub's own markup and styles.
 
-- A small control above the description translates it and switches between the translation and the original.
+- A button next to the description's "…" menu translates the title and description and switches back to the original.
 - Code, code blocks, mentions, references and URLs stay as written; only the prose is translated.
 - Translations are kept per pull request in the browser and requested again only when the text changes.
 - Private repositories are not translated unless listed in the options. The Gemini API free tier may use what it is
   sent to improve Google's products.
 
-Library choices and the rules the code follows: [docs/decisions.md](docs/decisions.md).
+Security invariants and the threat model: [docs/threat-model.md](docs/threat-model.md).
+Library choices, the planned stages and the patterns the code follows: [docs/decisions.md](docs/decisions.md).
 
 ## Use
 
