@@ -111,12 +111,15 @@ translating comments or review threads, and storing translations anywhere the ow
   never reads one. It reads only the provider choice, to name the provider. The key items live in their own module,
   because WXT reads an item's value as soon as it is defined: importing the module at all reads every key. _Enforced
   (main):_ `apiKeyItems` in `src/lib/api-keys.ts`, imported only by `src/entrypoints/background.ts` and
-  `src/entrypoints/options/main.ts`. _Pinned by source analysis, forbidden pattern:_ `src/lib/source-analysis.test.ts`
-  refuses `storage.sync` and `sync:` storage keys under `src`; refuses an import of `api-keys` (static, dynamic or
-  re-export) outside those two files, and any reference to `apiKeyItems` (or `apiKeyItem`) outside them and
+  `src/entrypoints/options/main.ts`. _Pinned by behavior:_ `src/lib/content-script-storage.test.ts` ("KEY-1") loads
+  the content script and everything it imports on WXT's fake browser, runs its `main` on a page, records every
+  `storage.local` read, and fails on any key's storage name (taken from the items themselves) or a bulk read (`get()`,
+  `get(null)`, `getKeys()`). _And by source analysis, forbidden pattern:_ `src/lib/source-analysis.test.ts` refuses
+  `storage.sync` and `sync:` storage keys under `src`; refuses an import of `api-keys` (static, dynamic or re-export)
+  outside those two files, and any reference to `apiKeyItems` (or `apiKeyItem`) outside them and
   `src/lib/api-keys.ts`; and refuses a key's storage name (any string ending in `apiKey`, such as `local:apiKey` or
-  `local:deepseekApiKey`) outside `src/lib/api-keys.ts`. A bulk read of `storage.local` is not caught; the accepted risk
-  below covers it.
+  `local:deepseekApiKey`) outside `src/lib/api-keys.ts`. _Gap: the behavior test runs the load and the first sync, not
+  a click, a settings change or a later navigation; the accepted risk below covers those paths._
 - **KEY-2: a key travels only in a request header to its own provider.** Gemini's is sent as `x-goog-api-key` to the
   Gemini endpoint, DeepSeek's and OpenAI's as `Authorization: Bearer` to their Responses API endpoints; never in a URL
   or the body. Endpoints are constants per provider, not settings, and the extension's only host permissions are those
@@ -132,10 +135,14 @@ translating comments or review threads, and storing translations anywhere the ow
 
 - **MSG-1: the background acts only on this extension's own messages, of known shapes.** It ignores a message whose
   sender is not this extension, and parses every message with `MessageSchema` before acting; an unknown or malformed
-  message gets no answer. _Enforced (main):_ the listener in `src/entrypoints/background.ts`, `MessageSchema` in
-  `src/lib/messages.ts`; `src/lib/messages.test.ts` ("MSG-1": known messages parse, unknown types and wrong fields
-  fail). _Pinned by behavior; and by source analysis, required pattern:_ `src/lib/source-analysis.test.ts` requires the
-  sender check and the `MessageSchema` parse in `src/entrypoints/background.ts`.
+  message gets no answer. _Enforced (main):_ `createMessageHandler` in `src/lib/message-handler.ts`, `MessageSchema` in
+  `src/lib/messages.ts`, the listener in `src/entrypoints/background.ts`. _Pinned by behavior:_
+  `src/lib/message-handler.test.ts` ("MSG-1": a message from another sender or none, of an unknown type, of a malformed
+  shape or not an object calls neither the translation nor the options and gets no answer; a valid message dispatches;
+  a translation that throws answers `api-error`) and `src/lib/messages.test.ts` ("MSG-1": the schema's accepted and
+  refused shapes). _And by source analysis, required pattern:_ `src/lib/source-analysis.test.ts` requires that
+  `src/entrypoints/background.ts` registers one `onMessage` listener, `createMessageHandler`, with
+  `runtimeId: browser.runtime.id`, the wiring no test runs.
 
 ### Privacy (PRIV)
 
@@ -220,14 +227,14 @@ translating comments or review threads, and storing translations anywhere the ow
 
 ## Accepted risks
 
-| Risk                                                                                                         | Why accepted                                                                                                                                       | Revisit when                                                  |
-| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| A content script could read `storage.local` in bulk, where the API keys are (KEY-1)                          | Content scripts run in an isolated world the page cannot reach, and this content script neither imports the key items nor names their storage keys | stage 2 moves the key off the extension                       |
-| A pull request can steer its own translation with instructions aimed at the model (R1)                       | The output is only text shown to the owner (DOM-1); a wrong translation is visible next to the original                                            | translations are used for anything but reading                |
-| Public pull request text is sent to the model provider (R5)                                                  | It is public already                                                                                                                               | never                                                         |
-| The free Gemini tier may use requests to improve Google's products                                           | Private repositories are opt-in (PRIV-1), and the owner chooses the key's project                                                                  | the owner translates private repositories with Gemini         |
-| DeepSeek's retention and use of API requests is not verified; `store: false` is not supported there (PRIV-3) | Private repositories stay opt-in for every provider (PRIV-1); DeepSeek is the default for public pull requests                                     | the owner lists private repositories while DeepSeek is chosen |
-| GitHub's markup changes break the selectors                                                                  | The extension then translates nothing; it does not fall back to wider selectors                                                                    | never                                                         |
+| Risk                                                                                                                                               | Why accepted                                                                                                                                                                                       | Revisit when                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| A content script path the KEY-1 behavior test does not run (a click, a settings change) could read `storage.local` in bulk, where the API keys are | Content scripts run in an isolated world the page cannot reach; the content script neither imports the key items nor names their storage keys, and its load and first sync are checked by behavior | stage 2 moves the key off the extension                       |
+| A pull request can steer its own translation with instructions aimed at the model (R1)                                                             | The output is only text shown to the owner (DOM-1); a wrong translation is visible next to the original                                                                                            | translations are used for anything but reading                |
+| Public pull request text is sent to the model provider (R5)                                                                                        | It is public already                                                                                                                                                                               | never                                                         |
+| The free Gemini tier may use requests to improve Google's products                                                                                 | Private repositories are opt-in (PRIV-1), and the owner chooses the key's project                                                                                                                  | the owner translates private repositories with Gemini         |
+| DeepSeek's retention and use of API requests is not verified; `store: false` is not supported there (PRIV-3)                                       | Private repositories stay opt-in for every provider (PRIV-1); DeepSeek is the default for public pull requests                                                                                     | the owner lists private repositories while DeepSeek is chosen |
+| GitHub's markup changes break the selectors                                                                                                        | The extension then translates nothing; it does not fall back to wider selectors                                                                                                                    | never                                                         |
 
 ## How to use
 
