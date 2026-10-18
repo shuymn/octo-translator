@@ -1,5 +1,5 @@
 import { Controls, MARK, type ControlsView } from "./controls.ts";
-import type { SourceSegment, TranslationError, TranslationResult } from "./gemini.ts";
+import type { SourceSegment, TranslationError, TranslationResult } from "./translation.ts";
 import {
   findBody,
   findCommentHeader,
@@ -19,18 +19,20 @@ export type Settings = {
 export type ControllerDeps = {
   doc: Document;
   pathname: () => string;
+  // The provider's name as the page shows it, such as "Gemini".
+  providerLabel: string;
   translate: (key: string, segments: SourceSegment[]) => Promise<TranslationResult>;
   openOptions: () => void;
 };
 
-const ERROR_MESSAGES: Record<TranslationError, string> = {
-  "no-api-key": "Gemini の API キーが設定されていません。",
-  "api-key-rejected": "API キーが受け付けられませんでした。",
-  "rate-limited": "無料枠の上限に達しました。しばらくしてからもう一度試してください。",
-  "too-long": "本文が長すぎるため翻訳しません。",
-  network: "Gemini API に接続できませんでした。",
-  "api-error": "Gemini API がエラーを返しました。",
-  "invalid-response": "翻訳結果を読み取れませんでした。",
+const ERROR_MESSAGES: Record<TranslationError, (provider: string) => string> = {
+  "no-api-key": (provider) => `${provider} の API キーが設定されていません。`,
+  "api-key-rejected": () => "API キーが受け付けられませんでした。",
+  "rate-limited": () => "無料枠の上限に達しました。しばらくしてからもう一度試してください。",
+  "too-long": () => "本文が長すぎるため翻訳しません。",
+  network: (provider) => `${provider} API に接続できませんでした。`,
+  "api-error": (provider) => `${provider} API がエラーを返しました。`,
+  "invalid-response": () => "翻訳結果を読み取れませんでした。",
 };
 
 const SETTINGS_ERRORS: ReadonlySet<TranslationError> = new Set(["no-api-key", "api-key-rejected"]);
@@ -130,7 +132,7 @@ export class PageController {
       parts,
       phase: titleSegment === undefined && parts.length === 0 ? { kind: "none" } : { kind: "idle" },
       showTranslation: false,
-      controls: new Controls(this.#deps.doc, {
+      controls: new Controls(this.#deps.doc, this.#deps.providerLabel, {
         onToggle: () => this.#onToggle(state),
         onOpenSettings: () => this.#deps.openOptions(),
       }),
@@ -229,7 +231,11 @@ export class PageController {
     const { phase } = state;
     if (phase.kind === "loading") return { kind: "loading" };
     if (phase.kind === "error") {
-      return { kind: "error", message: ERROR_MESSAGES[phase.code], offerSettings: SETTINGS_ERRORS.has(phase.code) };
+      return {
+        kind: "error",
+        message: ERROR_MESSAGES[phase.code](this.#deps.providerLabel),
+        offerSettings: SETTINGS_ERRORS.has(phase.code),
+      };
     }
     if (phase.kind === "translated") {
       return {

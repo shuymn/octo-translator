@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
-import { buildRequestBody, MAX_SOURCE_CHARACTERS, MODEL, parseInteraction, translateSegments } from "./gemini.ts";
+import { buildRequestBody, MODEL, parseInteraction, translateSegments } from "./gemini.ts";
+import { MAX_SOURCE_CHARACTERS } from "./translation.ts";
 
 function interaction(text: string, status = "completed"): unknown {
   return {
@@ -63,16 +64,15 @@ describe("translateSegments", () => {
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
+  // Statuses every provider shares are in translation.test.ts; a 400 is read from Gemini's body.
   test.each([
-    [429, "rate-limited", { error: {} }],
     [400, "api-key-rejected", { error: { message: "API key not valid. Please pass a valid API key." } }],
     [
       400,
       "api-error",
       { error: { message: "Thinking level THINKING_LEVEL_MINIMAL is not supported for this model." } },
     ],
-    [403, "api-key-rejected", { error: {} }],
-    [500, "api-error", { error: {} }],
+    [429, "rate-limited", { error: {} }],
   ])("maps HTTP %i to %s", async (status, code, body) => {
     await expect(translateSegments([{ kind: "paragraph", text: "a" }], "key", respond(status, body))).resolves.toEqual({
       ok: false,
@@ -92,10 +92,14 @@ describe("translateSegments", () => {
 });
 
 describe("parseInteraction", () => {
+  test("reads the text of the model's output steps", () => {
+    expect(parseInteraction(interaction('{"translations":["a"]}'), 1)).toEqual({ ok: true, translations: ["a"] });
+  });
+
+  // The checks on the text itself are in translation.test.ts; these two show the text goes through them.
   test.each([
-    ["a count that does not match", interaction('{"translations":["a","b"]}')],
-    ["text that is not JSON", interaction("translations: a")],
-    ["JSON of another shape", interaction('{"text":"a"}')],
+    ["text that is not JSON", interaction("not json")],
+    ["a different number of translations", interaction('{"translations":["a","b"]}')],
     ["an interaction that did not complete", interaction('{"translations":["a"]}', "failed")],
     ["a body that is not an interaction", { error: { code: 500 } }],
   ])("rejects %s", (_, body) => {

@@ -1,5 +1,5 @@
 import { hashSegments, lookup, store, type Cache } from "./cache.ts";
-import type { SourceSegment, TranslationResult } from "./gemini.ts";
+import type { SourceSegment, TranslationResult } from "./translation.ts";
 
 export type TranslateDeps = {
   getApiKey: () => Promise<string>;

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { PageController, type ControllerDeps, type Settings } from "./controller.ts";
-import type { SourceSegment, TranslationResult } from "./gemini.ts";
+import type { SourceSegment, TranslationResult } from "./translation.ts";
 
 const HEADER = `
   <div class="timeline-comment-header">
@@ -37,7 +37,7 @@ const prefixAll = vi.fn<Translate>(async (_key: string, segments: SourceSegment[
 function setup(settings: Partial<Settings> = {}, translate: Translate = prefixAll) {
   const openOptions = vi.fn<() => void>();
   const controller = new PageController(
-    { doc: document, pathname: () => "/owner/repo/pull/7", translate, openOptions },
+    { doc: document, pathname: () => "/owner/repo/pull/7", providerLabel: "DeepSeek", translate, openOptions },
     { autoTranslate: false, privateRepositories: [], ...settings },
   );
   controller.sync();
@@ -84,7 +84,7 @@ describe("PageController", () => {
     expect(bodyElement()?.querySelector("pre")?.textContent).toBe("const x = 1;");
     expect(headerButton()?.getAttribute("aria-pressed")).toBe("true");
     expect(note()?.hidden).toBe(false);
-    expect(note()?.textContent).toBe("• Gemini による日本語訳");
+    expect(note()?.textContent).toBe("• DeepSeek による日本語訳");
     expect(notice()?.className).toBe("sr-only");
     expect(notice()?.nextElementSibling).toBe(bodyElement());
   });
@@ -156,7 +156,13 @@ describe("PageController", () => {
     renderPage({ visibility: "false" });
     let pathname = "/owner/repo/pull/7";
     const controller = new PageController(
-      { doc: document, pathname: () => pathname, translate: prefixAll, openOptions: vi.fn<() => void>() },
+      {
+        doc: document,
+        pathname: () => pathname,
+        providerLabel: "Gemini",
+        translate: prefixAll,
+        openOptions: vi.fn<() => void>(),
+      },
       { autoTranslate: false, privateRepositories: ["owner/repo"] },
     );
     controller.sync();
@@ -182,7 +188,7 @@ describe("PageController", () => {
     await settle();
 
     expect(notice()?.classList.contains("flash-warn")).toBe(true);
-    expect(notice()?.textContent).toContain("Gemini の API キーが設定されていません。");
+    expect(notice()?.textContent).toContain("DeepSeek の API キーが設定されていません。");
     expect(noticeLinks().map((link) => link.textContent)).toEqual(["もう一度試す", "設定を開く"]);
     noticeLinks()[1]?.click();
     expect(openOptions).toHaveBeenCalled();
@@ -196,7 +202,7 @@ describe("PageController", () => {
 
     expect(bodyElement()?.querySelector("p")?.textContent).toBe("This fixes parse, see the docs.");
     expect(visibleTitle()?.textContent).toBe("タイトル parse");
-    expect(note()?.textContent).toBe("• Gemini による日本語訳（一部は原文のまま）");
+    expect(note()?.textContent).toBe("• DeepSeek による日本語訳（一部は原文のまま）");
   });
 
   test("reports a title left in the original", async () => {
@@ -207,7 +213,7 @@ describe("PageController", () => {
 
     expect(visibleTitle()?.textContent).toBe("Fix parse crash");
     expect(bodyElement()?.querySelector("p")?.textContent).toBe("本文 parse、資料。");
-    expect(note()?.textContent).toBe("• Gemini による日本語訳（一部は原文のまま）");
+    expect(note()?.textContent).toBe("• DeepSeek による日本語訳（一部は原文のまま）");
   });
 
   test("follows GitHub when it renders the title, the header or the description again", async () => {
@@ -239,7 +245,13 @@ describe("PageController", () => {
     renderPage();
     let pathname = "/owner/repo/pull/7";
     const controller = new PageController(
-      { doc: document, pathname: () => pathname, translate: prefixAll, openOptions: vi.fn<() => void>() },
+      {
+        doc: document,
+        pathname: () => pathname,
+        providerLabel: "Gemini",
+        translate: prefixAll,
+        openOptions: vi.fn<() => void>(),
+      },
       { autoTranslate: true, privateRepositories: [] },
     );
     controller.sync();
