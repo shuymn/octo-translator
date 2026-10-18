@@ -104,6 +104,17 @@ export class PageController {
     return isPublicRepository(doc) || this.#settings.privateRepositories.includes(repository);
   }
 
+  #stillAllowed(state: State): boolean {
+    const ref = parsePullRequestPath(this.#deps.pathname());
+    return (
+      this.#state === state &&
+      ref !== undefined &&
+      pullRequestKey(ref) === state.key &&
+      state.body.isConnected &&
+      this.#allowed(repositoryName(ref), this.#deps.doc)
+    );
+  }
+
   #createState(key: string, body: HTMLElement, title: HTMLElement | undefined): State {
     const extracted = title ? extractInlineSegment(title, "title") : undefined;
     const titleSegment = extracted && !isJapanese(extracted.source) ? extracted : undefined;
@@ -141,6 +152,9 @@ export class PageController {
   }
 
   async #translate(state: State): Promise<void> {
+    // Checked again right before sending: a click can land after GitHub moved to another pull request (a private one,
+    // say) but before the next sync noticed.
+    if (!this.#stillAllowed(state)) return;
     state.phase = { kind: "loading" };
     this.#render(state);
     const sources = [

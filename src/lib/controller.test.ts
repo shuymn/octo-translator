@@ -151,6 +151,22 @@ describe("PageController", () => {
     expect(headerButton()).not.toBeNull();
   });
 
+  test("does not send a page GitHub has moved away from before the next sync", async () => {
+    renderPage({ visibility: "false" });
+    let pathname = "/owner/repo/pull/7";
+    const controller = new PageController(
+      { doc: document, pathname: () => pathname, translate: prefixAll, openOptions: vi.fn<() => void>() },
+      { autoTranslate: false, privateRepositories: ["owner/repo"] },
+    );
+    controller.sync();
+
+    // GitHub navigated to a private pull request that is not allowed; the old button is clicked before sync runs.
+    pathname = "/owner/secret/pull/1";
+    headerButton()?.click();
+    await settle();
+    expect(prefixAll).not.toHaveBeenCalled();
+  });
+
   test("shows nothing for a pull request already in Japanese", () => {
     renderPage({ title: "バグを修正", body: "<p>本文です。</p>" });
     setup({ autoTranslate: true });
