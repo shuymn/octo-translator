@@ -35,7 +35,7 @@ function recordReads() {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-test("KEY-1: the content script never reads an API key from storage", async () => {
+test("KEY-1: the content script never reads an API key or the Worker's service token from storage", async () => {
   const reads = recordReads();
   document.head.innerHTML = '<meta name="octolytics-dimension-repository_public" content="true">';
   document.body.innerHTML = "";
@@ -52,10 +52,10 @@ test("KEY-1: the content script never reads an API key from storage", async () =
   expect(reads.keys()).toContain("modelChoice");
   expect(reads.bulk()).toBe(false);
 
-  // The key names come from the items themselves, imported only now: importing them reads the keys too.
+  // The secrets' names come from the items themselves, imported only now: importing them reads the secrets too.
   const readByContentScript = reads.keys();
-  const { apiKeyItems } = await import("./api-keys.ts");
-  const keyNames = Object.values(apiKeyItems).map((item) => item.key.replace(/^local:/, ""));
-  expect(keyNames.length).toBeGreaterThan(0);
+  const { apiKeyItems, workerAccessItem } = await import("./api-keys.ts");
+  const keyNames = [...Object.values(apiKeyItems), workerAccessItem].map((item) => item.key.replace(/^local:/, ""));
+  expect(keyNames).toContain("workerAccess");
   for (const name of keyNames) expect(readByContentScript).not.toContain(name);
 });

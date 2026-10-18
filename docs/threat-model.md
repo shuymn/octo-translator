@@ -34,9 +34,12 @@ ID.
 
 - One user, the owner, who installs the extension unpacked in their own Chrome and is signed in to GitHub there.
 - The extension runs a content script on `https://github.com/*` and a background service worker. It has the `storage`
-  permission and host access to the model providers' APIs only (DeepSeek, OpenAI, Gemini).
-- Today the background calls the model provider directly with the owner's API key. From stage 2, it calls the owner's
-  Worker instead, which holds the provider keys and a GitHub token with read access to the owner's repositories.
+  permission and host access to the model providers' APIs (DeepSeek, OpenAI, Gemini); `https://*/*` is an optional
+  host permission, of which the options page asks for the one https origin of the owner's Worker when it is saved.
+- Without a Worker, the background calls the model provider directly with the owner's API key. With a Worker URL and
+  an Access service token saved in the options, it calls the Worker instead, which holds the provider keys (and, from
+  PR 5, a GitHub token with read access to the owner's repositories); it falls back to the provider only when the
+  Worker cannot be reached and a local key exists (KEY-4).
 - The Worker (`worker/`) is deployed by the owner behind a Cloudflare Access application whose policy admits the
   extension's service token. The Access application, its policy and the service token are dashboard settings; the
   repository holds none of their identifiers.
@@ -62,6 +65,7 @@ translating comments or review threads, and storing translations anywhere the ow
 | A6  | Cost: model tokens, Cloudflare requests, Durable Object time and storage | The owner pays                                                                                           |
 | A7  | The Worker's Access settings: team domain and application audience tag   | Not credentials, but they identify the owner's Cloudflare setup; Worker secrets, never in the repository |
 | A8  | The Worker's D1 database: pull request keys and their translations       | Private repositories' names and translated text; read only through the Worker, behind AUTH-1             |
+| A9  | The Access service token (client id and secret) in the extension         | It opens the Worker, which spends the owner's provider keys (A2, A6); in the extension's storage only    |
 
 ## Adversaries
 
@@ -76,19 +80,20 @@ translating comments or review threads, and storing translations anywhere the ow
 
 ## Entry points
 
-| Entry point                                          | Reached by | Trusted after                                                 | Status and code                                                                                    |
-| ---------------------------------------------------- | ---------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| The pull request's title and description in the DOM  | R1         | never; read as text, sent as data                             | main: `src/lib/pr-page.ts`, `src/lib/segments.ts`                                                  |
-| Model responses                                      | R2         | schema check, then marker check per segment (DOM-1)           | main: `src/lib/responses.ts`, `src/lib/gemini.ts`, `src/lib/translation.ts`, `src/lib/segments.ts` |
-| Runtime messages to the background                   | R3         | sender is this extension, schema check (MSG-1)                | main: `src/entrypoints/background.ts`, `src/lib/messages.ts`                                       |
-| Responses from the background to the content script  | R3         | schema check                                                  | main: `src/entrypoints/github.content.ts`                                                          |
-| The options page                                     | owner      | form validation; the provider choice by `parseChoice`         | main: `src/entrypoints/options/`, `src/lib/providers.ts`                                           |
-| Worker routes (`GET /v1/ping`, `POST /v1/translate`) | R4         | Cloudflare Access, then the Access JWT (AUTH-1)               | main: `worker/src/handler.ts`, `worker/src/auth.ts`                                                |
-| The translate route's body                           | owner      | AUTH-1, then a byte limit and a schema check (RES-1)          | main: `worker/src/body.ts`, `worker/src/translate.ts`                                              |
-| Rows read back from D1                               | the Worker | schema check; a row that does not fit is a miss               | main: `worker/src/translations-db.ts`                                                              |
-| Scheduled GitHub search and pull request bodies      | R1         | never; read as text                                           | Planned (2)                                                                                        |
-| Agent tools and the wiki                             | R1, R2     | tools are read-only except the wiki writer (WIKI-1, WIKI-2)   | Planned (3)                                                                                        |
-| Build, CI and dependency updates                     | R6         | lockfile, release age, exact versions, pinned Actions (SUP-1) | main: `package.json`, `worker/package.json`, `pnpm-workspace.yaml`, `.github/workflows/`           |
+| Entry point                                          | Reached by | Trusted after                                                                             | Status and code                                                                                    |
+| ---------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| The pull request's title and description in the DOM  | R1         | never; read as text, sent as data                                                         | main: `src/lib/pr-page.ts`, `src/lib/segments.ts`                                                  |
+| Model responses                                      | R2         | schema check, then marker check per segment (DOM-1)                                       | main: `src/lib/responses.ts`, `src/lib/gemini.ts`, `src/lib/translation.ts`, `src/lib/segments.ts` |
+| Runtime messages to the background                   | R3         | sender is this extension, schema check (MSG-1)                                            | main: `src/entrypoints/background.ts`, `src/lib/messages.ts`                                       |
+| The Worker's answers to the background               | R2, R4     | status 200, `TranslationResultSchema`, one translation per segment, then DOM-1            | main: `src/lib/worker-client.ts`                                                                   |
+| Responses from the background to the content script  | R3         | schema check                                                                              | main: `src/entrypoints/github.content.ts`                                                          |
+| The options page                                     | owner      | form validation; the provider choice by `parseChoice`, the Worker URL by `parseWorkerUrl` | main: `src/entrypoints/options/`, `src/lib/providers.ts`, `src/lib/worker-client.ts`               |
+| Worker routes (`GET /v1/ping`, `POST /v1/translate`) | R4         | Cloudflare Access, then the Access JWT (AUTH-1)                                           | main: `worker/src/handler.ts`, `worker/src/auth.ts`                                                |
+| The translate route's body                           | owner      | AUTH-1, then a byte limit and a schema check (RES-1)                                      | main: `worker/src/body.ts`, `worker/src/translate.ts`                                              |
+| Rows read back from D1                               | the Worker | schema check; a row that does not fit is a miss                                           | main: `worker/src/translations-db.ts`                                                              |
+| Scheduled GitHub search and pull request bodies      | R1         | never; read as text                                                                       | Planned (2)                                                                                        |
+| Agent tools and the wiki                             | R1, R2     | tools are read-only except the wiki writer (WIKI-1, WIKI-2)                               | Planned (3)                                                                                        |
+| Build, CI and dependency updates                     | R6         | lockfile, release age, exact versions, pinned Actions (SUP-1)                             | main: `package.json`, `worker/package.json`, `pnpm-workspace.yaml`, `.github/workflows/`           |
 
 ## Invariants
 
@@ -113,24 +118,26 @@ translating comments or review threads, and storing translations anywhere the ow
 
 ### Credentials (KEY)
 
-- **KEY-1: the API keys are kept in `storage.local` and read only by the background and the options page.** One key
-  per provider; none is ever in `storage.sync` (which copies it to every signed-in browser), and the content script
-  never reads one. It reads only the provider choice, to name the provider. The key items live in their own module,
-  because WXT reads an item's value as soon as it is defined: importing the module at all reads every key. _Enforced
-  (main):_ `apiKeyItems` in `src/lib/api-keys.ts`, imported only by `src/entrypoints/background.ts` and
+- **KEY-1: the API keys and the Worker's service token are kept in `storage.local` and read only by the background
+  and the options page.** One key per provider, and the Worker configuration (its origin with the Access service token's client id and
+  secret, in one item); none is ever in
+  `storage.sync` (which copies it to every signed-in browser), and the content script never reads one. It reads only
+  the provider choice, to name the provider. The secret items live in their own module, because WXT reads an item's
+  value as soon as it is defined: importing the module at all reads every secret. _Enforced (main):_ `apiKeyItems` and
+  `workerAccessItem` in `src/lib/api-keys.ts`, imported only by `src/entrypoints/background.ts` and
   `src/entrypoints/options/main.ts`. _Pinned by behavior:_ `src/lib/content-script-storage.test.ts` ("KEY-1") loads
   the content script and everything it imports on WXT's fake browser, runs its `main` on a page, records every
-  `storage.local` read, and fails on any key's storage name (taken from the items themselves) or a bulk read (`get()`,
-  `get(null)`, `getKeys()`). _And by source analysis, forbidden pattern:_ `src/lib/source-analysis.test.ts` refuses
-  `storage.sync` and `sync:` storage keys under `src`; refuses an import of `api-keys` (static, dynamic or re-export)
-  outside those two files, and any reference to `apiKeyItems` (or `apiKeyItem`) outside them and
-  `src/lib/api-keys.ts`; and refuses a key's storage name (any string ending in `apiKey`, such as `local:apiKey` or
-  `local:deepseekApiKey`) outside `src/lib/api-keys.ts`. _Gap: the behavior test runs the load and the first sync, not
+  `storage.local` read, and fails on any secret's storage name (taken from the items themselves) or a bulk read
+  (`get()`, `get(null)`, `getKeys()`). _And by source analysis, forbidden pattern:_ `src/lib/source-analysis.test.ts`
+  refuses `storage.sync` and `sync:` storage keys under `src`; refuses an import of `api-keys` (static, dynamic or
+  re-export) outside those two files, and any reference to `apiKeyItems`, `apiKeyItem` or `workerAccessItem` outside
+  them and `src/lib/api-keys.ts`; and refuses a secret's storage name (any string ending in `apiKey`, such as
+  `local:apiKey` or `local:deepseekApiKey`, and `workerAccess` or `local:workerAccess`) outside `src/lib/api-keys.ts`. _Gap: the behavior test runs the load and the first sync, not
   a click, a settings change or a later navigation; the accepted risk below covers those paths._
 - **KEY-2: a key travels only in a request header to its own provider.** Gemini's is sent as `x-goog-api-key` to the
   Gemini endpoint, DeepSeek's and OpenAI's as `Authorization: Bearer` to their Responses API endpoints; never in a URL
-  or the body. Endpoints are constants per provider, not settings, and the extension's only host permissions are those
-  three endpoints. _Enforced (main):_ `translateSegments` in `src/lib/gemini.ts`, `ENDPOINTS` and `translateResponses`
+  or the body. Endpoints are constants per provider, not settings, and the extension's required host permissions are
+  those three endpoints (the optional one is for the Worker's origin, KEY-4). _Enforced (main):_ `translateSegments` in `src/lib/gemini.ts`, `ENDPOINTS` and `translateResponses`
   in `src/lib/responses.ts`, `translateWith` in `src/lib/clients.ts`, `host_permissions` in `wxt.config.ts`;
   `src/lib/gemini.test.ts` and `src/lib/responses.test.ts` ("KEY-2": the URL has no key, the header has it) and
   `src/lib/clients.test.ts` ("KEY-2": each provider's request goes to that provider's endpoint). _Pinned by behavior._
@@ -142,7 +149,40 @@ translating comments or review threads, and storing translations anywhere the ow
   behavior._
 - **KEY-3: from stage 2, provider keys and the GitHub token live only on Cloudflare.** They are Worker secrets or AI
   Gateway provider keys; the extension holds only the Access service token, and the agent receives neither keys nor
-  the token, only tools that use them. _Planned (2)_ for the Worker, _Planned (3)_ for the agent.
+  the token, only tools that use them. _Planned (2)_ for the Worker, _Planned (3)_ for the agent. Until then the
+  extension keeps its provider keys for the local fallback of KEY-4; the owner who wants none in the browser leaves
+  them empty, and a Worker that cannot be reached then answers `worker-unreachable`.
+- **KEY-4: the Access service token goes only to the configured Worker origin, only in headers; provider keys never go
+  to the Worker.** The origin and the token are one stored item, `{ origin, clientId, clientSecret }`, written whole
+  and read once per request, so a token is never paired with another configuration's origin. The Worker URL is an https origin with the default port and no path, query, fragment or
+  credentials (`parseWorkerUrl`), checked on save and again whenever the background reads it. The token travels as
+  `CF-Access-Client-Id` and `CF-Access-Client-Secret` to `<origin>/v1/translate` only, never in the URL or the body,
+  and a redirect is not followed (Access redirects a request it does not admit to its login page unless strict
+  service token authentication is on), so the headers cannot reach another origin. The request body is the pull
+  request key, the segments and the provider choice; the provider keys are read only for a local translation. The
+  optional host permission is asked for that one origin from the options page, and the background sends nothing
+  without it: a revoked permission, a stored URL that no longer parses or half a token answers `worker-rejected`
+  without a request. An options page writes the configuration, and asks for or drops a permission, only when the
+  owner edited the Worker section there, so a page opened before a newer save does not put an older Worker back or
+  drop the newer origin's permission. Only a Worker that cannot be reached (a network failure or a timeout, before the status or while
+  the body is read, or a 5xx) falls back to the provider with the local key; a 401, 403, 429 (Access's or
+  Cloudflare's refusal; a provider's limit arrives inside a 200 as `rate-limited`), another 4xx or a redirect answers
+  `worker-rejected`, and a complete answer that is not a `TranslationResult` for every segment `invalid-response`,
+  without a local call. _Enforced (main):_
+  `parseWorkerUrl`, `resolveWorker`, `translateWithWorker` and `WORKER_FAILURE_HANDLING` in `src/lib/worker-client.ts`,
+  `createTranslateService` in `src/lib/translate-service.ts`, wired in `src/entrypoints/background.ts`;
+  `workerAccessItem` in `src/lib/api-keys.ts`; `planWorkerSave` and `storeWorker` in `src/lib/worker-edits.ts`, used
+  by `src/entrypoints/options/main.ts` with the permission request; `optional_host_permissions` in `wxt.config.ts`;
+  `src/lib/worker-client.test.ts` ("KEY-4": the URL, the headers, a body without the token, `redirect: "manual"`, each
+  status, a redirect, a timeout, a body cut off and malformed answers; the URLs accepted and refused; an origin
+  always paired with its own token while the configuration changes; an unusable setting),
+  `src/lib/worker-edits.test.ts` (a stale page's unrelated save leaves a newer configuration and its permission
+  intact; a replaced origin's permission is dropped) and
+  `src/lib/translate-service.test.ts` ("KEY-4": a Worker hit reads no provider key; 5xx and network failures, also while the body is
+  read, fall back; refusals, 429 included, and a malformed body do not; no local key answers the Worker failure). _Pinned by behavior._ _Gap: the options page's
+  permission request runs only in Chrome, inside the save click; no test drives it. Two pages saving the Worker at
+  the same moment may leave a replaced origin's permission granted; it is unused, as the token goes only to the
+  stored origin._
 
 ### Messages (MSG)
 
@@ -189,13 +229,15 @@ translating comments or review threads, and storing translations anywhere the ow
   `readJsonBody` in `worker/src/body.ts`, `handleTranslate` in `worker/src/translate.ts`; `worker/src/translate.test.ts`
   ("RES-1": a declared length and an endless stream over the limit, malformed bodies and choices, and too much text are
   refused before any provider call or statement). And in the extension: `MAX_SOURCE_CHARACTERS` and `sourceTooLong` in `src/lib/translation.ts`, `TIMEOUT_MS` in
-  `src/lib/gemini.ts` and `src/lib/responses.ts`; `src/lib/translation.test.ts` ("RES-1": the limit counts every
+  `src/lib/gemini.ts` and `src/lib/responses.ts`, and 130 seconds for the Worker (`TIMEOUT_MS` in
+  `src/lib/worker-client.ts`, longer than the Worker's own provider call); `src/lib/translation.test.ts` ("RES-1": the limit counts every
   segment), `src/lib/gemini.test.ts` and `src/lib/responses.test.ts` ("RES-1": too much text is refused before any
   request). _Pinned by behavior._ _Gap: the timeout is not exercised by a test._
 - **RES-2: one request per pull request, text version and model.** Translations are cached by the hash of their
   segments together with the provider, model and thinking level that made them, so another choice translates again
   instead of answering an older provider's translation; callers that ask while the same request is in flight share it; the cache keeps at most 5 MB, newest first, and a
-  failed cache write still answers the translation. _Enforced (main):_ `createTranslateService` in
+  failed cache write still answers the translation. The local cache is asked before the Worker, and a Worker's
+  translation is cached the same way. _Enforced (main):_ `createTranslateService` in
   `src/lib/translate-service.ts`, `store` in `src/lib/cache.ts`; `src/lib/translate-service.test.ts` ("RES-2"). _Pinned
   by behavior._ The Worker stores translations in D1 under the same key (pull request, `hashSegments`, `choiceKey`) and
   answers a stored one without a provider call; a failed translation is not stored, a failed store still answers, and a
@@ -274,23 +316,26 @@ translating comments or review threads, and storing translations anywhere the ow
 - **Segment extraction, markers or the controls:** DOM-1, PRIV-2. Keep the source analysis for HTML sinks passing.
 - **Selectors or page detection:** DOM-2, PRIV-1, PRIV-2.
 - **A provider client or the prompt:** KEY-2, PRIV-3, RES-1. Check where the key goes and what is sent.
-- **Settings or storage:** KEY-1, RES-2.
+- **Settings or storage:** KEY-1, KEY-4, RES-2.
+- **The extension's Worker client or its fallback:** KEY-4, KEY-2, RES-1, RES-2.
 - **Messages between the content script and the background:** MSG-1.
-- **The Worker (2):** AUTH-1, KEY-2, KEY-3, PRIV-1, DOM-3, RES-1 to RES-3. Keep the Worker's source analysis passing.
+- **The Worker (2):** AUTH-1, KEY-2, KEY-3, KEY-4, PRIV-1, DOM-3, RES-1 to RES-3. Keep the Worker's source analysis passing.
 - **The agent, its tools or the wiki (3):** WIKI-1 to WIKI-3, KEY-3, DOM-1 (its output is still a model's output).
 - **A new dependency or workflow:** SUP-1, SUP-2. Prefer a maintained, widely used library over custom security code,
   and record its version, age and license in the PR.
 
 ## Accepted risks
 
-| Risk                                                                                                                                               | Why accepted                                                                                                                                                                                       | Revisit when                                                  |
-| -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| A content script path the KEY-1 behavior test does not run (a click, a settings change) could read `storage.local` in bulk, where the API keys are | Content scripts run in an isolated world the page cannot reach; the content script neither imports the key items nor names their storage keys, and its load and first sync are checked by behavior | stage 2 moves the key off the extension                       |
-| A pull request can steer its own translation with instructions aimed at the model (R1)                                                             | The output is only text shown to the owner (DOM-1); a wrong translation is visible next to the original                                                                                            | translations are used for anything but reading                |
-| Public pull request text is sent to the model provider (R5)                                                                                        | It is public already                                                                                                                                                                               | never                                                         |
-| The free Gemini tier may use requests to improve Google's products                                                                                 | Private repositories are opt-in (PRIV-1), and the owner chooses the key's project                                                                                                                  | the owner translates private repositories with Gemini         |
-| DeepSeek's retention and use of API requests is not verified; `store: false` is not supported there (PRIV-3)                                       | Private repositories stay opt-in for every provider (PRIV-1); DeepSeek is the default for public pull requests                                                                                     | the owner lists private repositories while DeepSeek is chosen |
-| GitHub's markup changes break the selectors                                                                                                        | The extension then translates nothing; it does not fall back to wider selectors                                                                                                                    | never                                                         |
+| Risk                                                                                                                                                                     | Why accepted                                                                                                                                                                                          | Revisit when                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| A content script path the KEY-1 behavior test does not run (a click, a settings change) could read `storage.local` in bulk, where the API keys and the service token are | Content scripts run in an isolated world the page cannot reach; the content script neither imports the secret items nor names their storage keys, and its load and first sync are checked by behavior | stage 2 moves the keys off the extension                      |
+| While the Worker cannot be reached, the extension sends the text to the provider directly with its local key (KEY-4)                                                     | It is what the extension did before the Worker, with the same checks (PRIV-1, KEY-2); the owner opts out by leaving the local keys empty                                                              | KEY-3 removes the local keys                                  |
+| The service token is a long-lived secret in the browser profile                                                                                                          | A compromised profile is out of scope; the token opens only the Worker, and it is revoked from the Access dashboard                                                                                   | Access offers a shorter-lived credential for the extension    |
+| A pull request can steer its own translation with instructions aimed at the model (R1)                                                                                   | The output is only text shown to the owner (DOM-1); a wrong translation is visible next to the original                                                                                               | translations are used for anything but reading                |
+| Public pull request text is sent to the model provider (R5)                                                                                                              | It is public already                                                                                                                                                                                  | never                                                         |
+| The free Gemini tier may use requests to improve Google's products                                                                                                       | Private repositories are opt-in (PRIV-1), and the owner chooses the key's project                                                                                                                     | the owner translates private repositories with Gemini         |
+| DeepSeek's retention and use of API requests is not verified; `store: false` is not supported there (PRIV-3)                                                             | Private repositories stay opt-in for every provider (PRIV-1); DeepSeek is the default for public pull requests                                                                                        | the owner lists private repositories while DeepSeek is chosen |
+| GitHub's markup changes break the selectors                                                                                                                              | The extension then translates nothing; it does not fall back to wider selectors                                                                                                                       | never                                                         |
 
 ## How to use
 

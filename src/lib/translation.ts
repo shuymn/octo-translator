@@ -18,6 +18,10 @@ export const TRANSLATION_ERRORS = [
   "network",
   "api-error",
   "invalid-response",
+  // The owner's Worker (stage 2) refused the request, or its settings are incomplete: no fallback, the options fix it.
+  "worker-rejected",
+  // The Worker could not be reached and there is no local key to translate with instead.
+  "worker-unreachable",
 ] as const;
 export type TranslationError = (typeof TRANSLATION_ERRORS)[number];
 

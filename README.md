@@ -24,6 +24,12 @@ Library choices, the planned stages and the patterns the code follows: [docs/dec
 3. Open the extension's options, choose the provider, model and thinking level, paste the key, and choose whether to
    translate automatically. Each provider keeps its own key, so switching does not lose the others; a Gemini key saved
    by an earlier version is kept.
+4. Optionally, translate through your own Worker (see [Worker](#worker)): in the options' Worker section, enter the
+   Worker's URL (`https://` and the host only, no path) and the client id and secret of the Cloudflare Access service
+   token its Access application admits, then save and allow the extension to connect to that origin when Chrome asks.
+   Translations then go to the Worker. When the Worker cannot be reached, the extension translates with the local key
+   as before (leave the keys empty to never do so); when the Worker refuses the request, the page says so and links to
+   the options. Clear the URL to stop using the Worker; the token is removed with it.
 
 ## Development
 

@@ -72,10 +72,10 @@ const SYNC_STORAGE: Rule = {
   allowed: [],
 };
 
-// KEY-1: the API key items are used only where a key is needed.
+// KEY-1: the secret items (API keys, the Worker's service token) are used only where a secret is needed.
 const API_KEY_ITEM: Rule = {
-  name: "the API key items",
-  pattern: /\bapiKeyItems?\b/,
+  name: "the secret items",
+  pattern: /\b(?:apiKeyItems?|workerAccessItem)\b/,
   under: EXTENSION,
   allowed: ["src/lib/api-keys.ts", "src/entrypoints/background.ts", "src/entrypoints/options/main.ts"],
 };
@@ -89,11 +89,11 @@ const API_KEY_MODULE: Rule = {
   allowed: ["src/entrypoints/background.ts", "src/entrypoints/options/main.ts"],
 };
 
-// KEY-1: a key's storage name (`apiKey`, `deepseekApiKey`, ...), which would read it without the item, appears only
-// where the items are defined.
+// KEY-1: a secret's storage name (`apiKey`, `deepseekApiKey`, `workerAccess`, ...), which would read it without
+// the item, appears only where the items are defined.
 const API_KEY_NAME: Rule = {
-  name: "an API key's storage name",
-  pattern: /["'`](?:local:)?\w*apikey["'`]/i,
+  name: "a secret's storage name",
+  pattern: /["'`](?:local:)?(?:\w*apikey|workeraccess)["'`]/i,
   under: EXTENSION,
   allowed: ["src/lib/api-keys.ts"],
 };
@@ -191,7 +191,7 @@ describe("source analysis", () => {
     expect(violations(HTML_SINKS, { "src/x.ts": glob })).toEqual(["src/x.ts"]);
   });
 
-  test("KEY-1: catches storage.sync, and the key items, their module and storage names outside their files", () => {
+  test("KEY-1: catches storage.sync, and the secret items, their module and storage names outside their files", () => {
     expect(violations(SYNC_STORAGE, { "src/x.ts": "browser.storage.sync.set({ k: 1 });" })).toEqual(["src/x.ts"]);
     expect(violations(SYNC_STORAGE, { "src/x.ts": 'storage.defineItem("sync:apiKey");' })).toEqual(["src/x.ts"]);
     expect(violations(SYNC_STORAGE, { "src/x.ts": "// storage.sync would copy it\nconst url = 'https://x';" })).toEqual(
@@ -202,8 +202,10 @@ describe("source analysis", () => {
         "src/entrypoints/github.content.ts": "await apiKeyItems.deepseek.getValue();",
         "src/lib/controller.ts": "await apiKeyItem.getValue();",
         "src/entrypoints/background.ts": "await apiKeyItems[provider].getValue();",
+        "src/lib/translate-service.ts": "await workerAccessItem.getValue();",
+        "src/entrypoints/options/main.ts": "await workerAccessItem.getValue();",
       }),
-    ).toEqual(["src/entrypoints/github.content.ts", "src/lib/controller.ts"]);
+    ).toEqual(["src/entrypoints/github.content.ts", "src/lib/controller.ts", "src/lib/translate-service.ts"]);
     expect(
       violations(API_KEY_NAME, {
         "src/entrypoints/github.content.ts": 'await browser.storage.local.get("apiKey");',
@@ -212,12 +214,19 @@ describe("source analysis", () => {
         "src/lib/api-keys.ts": 'storage.defineItem<string>("local:apiKey");',
         "src/lib/settings.ts": 'storage.defineItem<string>("local:openaiApiKey");',
         "src/entrypoints/options/main.ts": 'document.querySelector("#api-key");',
+        "src/lib/worker-client.ts": 'browser.storage.local.get("workerAccess");',
+        "src/lib/messages.ts": 'storage.getItem("local:workerAccess");',
+        "src/entrypoints/options/index.ts": 'document.querySelector("#worker-client-secret");',
+        "src/lib/worker-edits.ts": 'const FIELDS = ["url", "clientId", "clientSecret"] as const;',
+        "src/lib/worker-client.test-helper.ts": 'headers.set("CF-Access-Client-Secret", value);',
       }),
     ).toEqual([
       "src/entrypoints/github.content.ts",
       "src/lib/controller.ts",
       "src/lib/cache.ts",
       "src/lib/settings.ts",
+      "src/lib/worker-client.ts",
+      "src/lib/messages.ts",
     ]);
     expect(
       violations(API_KEY_MODULE, {
