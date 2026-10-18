@@ -1,3 +1,8 @@
 # Copy to .dev.vars for `wrangler dev` (git-ignored). Values from the Access application (docs/threat-model.md, AUTH-1).
 ACCESS_TEAM_DOMAIN=https://<team>.cloudflareaccess.com
 ACCESS_AUD=<application audience tag>
+# Provider keys (KEY-2), each optional: a provider without one answers `no-api-key`. Leave empty for a local Worker
+# that never calls a provider.
+DEEPSEEK_API_KEY=
+OPENAI_API_KEY=
+GEMINI_API_KEY=

@@ -7,6 +7,12 @@ import { createHandler } from "./handler.ts";
 import { TEST_ENV } from "./test-env.ts";
 import { makeTestKeys, type TestKeys } from "./test-keys.ts";
 
+/** These tests reach no translation; one that did would fail. */
+const NO_TRANSLATION = {
+  translate: () => Promise.reject(new Error("no translation expected")),
+  now: () => 0,
+};
+
 let keys: TestKeys;
 beforeAll(async () => {
   keys = await makeTestKeys();
@@ -24,14 +30,14 @@ async function answer(response: Response): Promise<{ status: number; body: unkno
 
 describe("AUTH-1: the handler", () => {
   test("answers an authenticated ping", async () => {
-    const handle = createHandler({ keys: () => keys.local });
+    const handle = createHandler({ ...NO_TRANSLATION, keys: () => keys.local });
     const response = await handle(request("/v1/ping", { token: await keys.sign() }), TEST_ENV);
     expect(await answer(response)).toEqual({ status: 200, body: { ok: true } });
     expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 
   test("refuses a request without a token before routing, with a fixed answer", async () => {
-    const handle = createHandler({ keys: () => keys.local });
+    const handle = createHandler({ ...NO_TRANSLATION, keys: () => keys.local });
     for (const path of ["/v1/ping", "/unknown", "/"]) {
       expect(await answer(await handle(request(path), TEST_ENV))).toEqual({
         status: 401,
@@ -45,7 +51,7 @@ describe("AUTH-1: the handler", () => {
   });
 
   test("refuses an invalid token with a fixed answer that does not say why", async () => {
-    const handle = createHandler({ keys: () => keys.local });
+    const handle = createHandler({ ...NO_TRANSLATION, keys: () => keys.local });
     const tokens = [
       await keys.sign({ aud: "another-application" }),
       await keys.sign({ iss: "https://another-team.cloudflareaccess.com" }),
@@ -63,6 +69,7 @@ describe("AUTH-1: the handler", () => {
   test("verifies with the keys of the configured team", async () => {
     const asked: string[] = [];
     const handle = createHandler({
+      ...NO_TRANSLATION,
       keys: (certsUrl) => {
         asked.push(certsUrl.href);
         return keys.local;
@@ -86,7 +93,7 @@ describe("AUTH-1: the handler", () => {
       asked = true;
       return keys.local(header, token);
     };
-    const handle = createHandler({ keys: () => local });
+    const handle = createHandler({ ...NO_TRANSLATION, keys: () => local });
     const response = await handle(request("/v1/ping", { token: await keys.sign() }), env);
     expect(await answer(response)).toEqual({ status: 500, body: { ok: false, code: "misconfigured" } });
     expect(asked).toBe(false);
@@ -95,7 +102,7 @@ describe("AUTH-1: the handler", () => {
 
 describe("routing", () => {
   test("answers an unknown route with 404 and another method with 405", async () => {
-    const handle = createHandler({ keys: () => keys.local });
+    const handle = createHandler({ ...NO_TRANSLATION, keys: () => keys.local });
     const token = await keys.sign();
     expect(await answer(await handle(request("/v1/unknown", { token }), TEST_ENV))).toEqual({
       status: 404,
