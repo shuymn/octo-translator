@@ -57,7 +57,7 @@ export function findCommentHeader(body: HTMLElement): CommentHeader {
 }
 
 // GitHub states the repository's visibility in a meta tag. Anything other than an explicit "true" counts as private,
-// so a missing tag never sends a private description to the free tier.
+// so a missing tag never sends a private description to the provider.
 export function isPublicRepository(doc: Document): boolean {
   return doc.querySelector(SELECTORS.repositoryPublic)?.getAttribute("content") === "true";
 }

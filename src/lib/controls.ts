@@ -12,8 +12,9 @@ export const MARK = "data-octo-translator";
 
 export type ControlsView =
   | { kind: "idle" }
-  | { kind: "loading" }
-  | { kind: "translated"; showTranslation: boolean; partial: boolean }
+  // `provider` is the provider's name as the page shows it, such as "DeepSeek".
+  | { kind: "loading"; provider: string }
+  | { kind: "translated"; provider: string; showTranslation: boolean; partial: boolean }
   | { kind: "error"; message: string; offerSettings: boolean };
 
 export type ControlsHandlers = {
@@ -25,17 +26,14 @@ const BUTTON_LABEL = "日本語訳を表示";
 
 export class Controls {
   #doc: Document;
-  #providerLabel: string;
   #handlers: ControlsHandlers;
   #button: HTMLButtonElement;
   #note: HTMLElement;
   #notice: HTMLElement;
   #view: ControlsView = { kind: "idle" };
 
-  // `providerLabel` is the provider's name as the page shows it, such as "Gemini".
-  constructor(doc: Document, providerLabel: string, handlers: ControlsHandlers) {
+  constructor(doc: Document, handlers: ControlsHandlers) {
     this.#doc = doc;
-    this.#providerLabel = providerLabel;
     this.#handlers = handlers;
     // The markup of the header's own "…" button. `mr-1` evens the space on both sides: the actions sit 8px after
     // the author's label, and the "…" button has 4px of padding of its own.
@@ -117,7 +115,7 @@ export class Controls {
   #noteText(view: ControlsView): string | undefined {
     if (view.kind === "loading") return "翻訳しています…";
     if (view.kind === "translated" && view.showTranslation) {
-      return `${this.#providerLabel} による日本語訳${view.partial ? "（一部は原文のまま）" : ""}`;
+      return `${view.provider} による日本語訳${view.partial ? "（一部は原文のまま）" : ""}`;
     }
     return undefined;
   }
@@ -134,7 +132,7 @@ export class Controls {
         notice.replaceChildren(createIcon(this.#doc, "globe"), this.#link("日本語に翻訳", this.#handlers.onToggle));
         break;
       case "loading":
-        notice.replaceChildren(createIcon(this.#doc, "spinner"), `${this.#providerLabel} で翻訳しています…`);
+        notice.replaceChildren(createIcon(this.#doc, "spinner"), `${view.provider} で翻訳しています…`);
         break;
       case "translated":
         notice.replaceChildren(

@@ -50,21 +50,30 @@ const SYNC_STORAGE: Rule = {
   allowed: [],
 };
 
-// KEY-1: the API key item is used only where the key is needed.
+// KEY-1: the API key items are used only where a key is needed.
 const API_KEY_ITEM: Rule = {
-  name: "the API key item",
-  pattern: /\bapiKeyItem\b/,
-  allowed: ["src/lib/settings.ts", "src/entrypoints/background.ts", "src/entrypoints/options/main.ts"],
+  name: "the API key items",
+  pattern: /\bapiKeyItems?\b/,
+  allowed: ["src/lib/api-keys.ts", "src/entrypoints/background.ts", "src/entrypoints/options/main.ts"],
 };
 
-// KEY-1: the key's storage name, which would read it without the item, appears only where the item is defined.
+// KEY-1: the module of the key items is imported only where a key is needed. WXT reads an item when it is defined, so
+// importing the module at all reads every key.
+const API_KEY_MODULE: Rule = {
+  name: "the API key module",
+  pattern: /["'`](?:\.{1,2}\/)+(?:[\w-]+\/)*api-keys(?:\.[cm]?[jt]s)?["'`]/,
+  allowed: ["src/entrypoints/background.ts", "src/entrypoints/options/main.ts"],
+};
+
+// KEY-1: a key's storage name (`apiKey`, `deepseekApiKey`, ...), which would read it without the item, appears only
+// where the items are defined.
 const API_KEY_NAME: Rule = {
-  name: "the API key's storage name",
-  pattern: /["'`](?:local:)?apiKey["'`]/,
-  allowed: ["src/lib/settings.ts"],
+  name: "an API key's storage name",
+  pattern: /["'`](?:local:)?\w*apikey["'`]/i,
+  allowed: ["src/lib/api-keys.ts"],
 };
 
-const RULES = [HTML_SINKS, SYNC_STORAGE, API_KEY_ITEM, API_KEY_NAME];
+const RULES = [HTML_SINKS, SYNC_STORAGE, API_KEY_ITEM, API_KEY_MODULE, API_KEY_NAME];
 
 /** The files that break a rule. */
 function violations(rule: Rule, files: Readonly<Record<string, string>>): string[] {
@@ -111,7 +120,7 @@ describe("source analysis", () => {
     expect(violations(HTML_SINKS, { "src/x.ts": glob })).toEqual(["src/x.ts"]);
   });
 
-  test("KEY-1: catches storage.sync and the key item outside its files", () => {
+  test("KEY-1: catches storage.sync, and the key items, their module and storage names outside their files", () => {
     expect(violations(SYNC_STORAGE, { "src/x.ts": "browser.storage.sync.set({ k: 1 });" })).toEqual(["src/x.ts"]);
     expect(violations(SYNC_STORAGE, { "src/x.ts": 'storage.defineItem("sync:apiKey");' })).toEqual(["src/x.ts"]);
     expect(violations(SYNC_STORAGE, { "src/x.ts": "// storage.sync would copy it\nconst url = 'https://x';" })).toEqual(
@@ -119,16 +128,36 @@ describe("source analysis", () => {
     );
     expect(
       violations(API_KEY_ITEM, {
-        "src/entrypoints/github.content.ts": "await apiKeyItem.getValue();",
-        "src/entrypoints/background.ts": "await apiKeyItem.getValue();",
+        "src/entrypoints/github.content.ts": "await apiKeyItems.deepseek.getValue();",
+        "src/lib/controller.ts": "await apiKeyItem.getValue();",
+        "src/entrypoints/background.ts": "await apiKeyItems[provider].getValue();",
       }),
-    ).toEqual(["src/entrypoints/github.content.ts"]);
+    ).toEqual(["src/entrypoints/github.content.ts", "src/lib/controller.ts"]);
     expect(
       violations(API_KEY_NAME, {
         "src/entrypoints/github.content.ts": 'await browser.storage.local.get("apiKey");',
-        "src/lib/settings.ts": 'storage.defineItem<string>("local:apiKey");',
+        "src/lib/controller.ts": 'await browser.storage.local.get("local:deepseekApiKey");',
+        "src/lib/cache.ts": "storage.getItem(`local:openaiApiKey`);",
+        "src/lib/api-keys.ts": 'storage.defineItem<string>("local:apiKey");',
+        "src/lib/settings.ts": 'storage.defineItem<string>("local:openaiApiKey");',
+        "src/entrypoints/options/main.ts": 'document.querySelector("#api-key");',
       }),
-    ).toEqual(["src/entrypoints/github.content.ts"]);
+    ).toEqual([
+      "src/entrypoints/github.content.ts",
+      "src/lib/controller.ts",
+      "src/lib/cache.ts",
+      "src/lib/settings.ts",
+    ]);
+    expect(
+      violations(API_KEY_MODULE, {
+        "src/entrypoints/github.content.ts": 'import { apiKeyItems } from "../lib/api-keys.ts";',
+        "src/lib/settings.ts": 'export * from "./api-keys";',
+        "src/lib/controller.ts": "const keys = await import(`./api-keys.js`);",
+        "src/entrypoints/background.ts": 'import { apiKeyItems } from "../lib/api-keys.ts";',
+        "src/entrypoints/options/main.ts": 'import { apiKeyItems } from "../../lib/api-keys.ts";',
+        "src/lib/providers.ts": 'const url = "https://platform.openai.com/api-keys";',
+      }),
+    ).toEqual(["src/entrypoints/github.content.ts", "src/lib/settings.ts", "src/lib/controller.ts"]);
   });
 
   test("MSG-1: the background checks the sender and parses every message", () => {

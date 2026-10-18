@@ -37,8 +37,8 @@ const prefixAll = vi.fn<Translate>(async (_key: string, segments: SourceSegment[
 function setup(settings: Partial<Settings> = {}, translate: Translate = prefixAll) {
   const openOptions = vi.fn<() => void>();
   const controller = new PageController(
-    { doc: document, pathname: () => "/owner/repo/pull/7", providerLabel: "DeepSeek", translate, openOptions },
-    { autoTranslate: false, privateRepositories: [], ...settings },
+    { doc: document, pathname: () => "/owner/repo/pull/7", translate, openOptions },
+    { autoTranslate: false, privateRepositories: [], providerLabel: "DeepSeek", ...settings },
   );
   controller.sync();
   return { controller, openOptions };
@@ -148,7 +148,7 @@ describe("PageController", () => {
     expect(headerButton()).toBeNull();
     expect(notice()).toBeNull();
 
-    controller.updateSettings({ autoTranslate: false, privateRepositories: ["owner/repo"] });
+    controller.updateSettings({ autoTranslate: false, privateRepositories: ["owner/repo"], providerLabel: "DeepSeek" });
     expect(headerButton()).not.toBeNull();
   });
 
@@ -159,11 +159,10 @@ describe("PageController", () => {
       {
         doc: document,
         pathname: () => pathname,
-        providerLabel: "Gemini",
         translate: prefixAll,
         openOptions: vi.fn<() => void>(),
       },
-      { autoTranslate: false, privateRepositories: ["owner/repo"] },
+      { autoTranslate: false, privateRepositories: ["owner/repo"], providerLabel: "DeepSeek" },
     );
     controller.sync();
 
@@ -192,6 +191,24 @@ describe("PageController", () => {
     expect(noticeLinks().map((link) => link.textContent)).toEqual(["もう一度試す", "設定を開く"]);
     noticeLinks()[1]?.click();
     expect(openOptions).toHaveBeenCalled();
+  });
+
+  test("names the provider that made the translation, not one chosen afterwards", async () => {
+    renderPage();
+    const { controller } = setup();
+    headerButton()?.click();
+    await settle();
+    controller.updateSettings({ autoTranslate: false, privateRepositories: [], providerLabel: "OpenAI" });
+    expect(note()?.textContent).toBe("• DeepSeek による日本語訳");
+  });
+
+  test("names the chosen provider in a request made after the settings change", async () => {
+    renderPage();
+    const { controller } = setup({}, async () => ({ ok: false, code: "rate-limited" }));
+    controller.updateSettings({ autoTranslate: false, privateRepositories: [], providerLabel: "OpenAI" });
+    headerButton()?.click();
+    await settle();
+    expect(notice()?.textContent).toContain("OpenAI API の利用上限に達しました。");
   });
 
   test("DOM-1: keeps a part whose markers came back wrong in the original", async () => {
@@ -248,11 +265,10 @@ describe("PageController", () => {
       {
         doc: document,
         pathname: () => pathname,
-        providerLabel: "Gemini",
         translate: prefixAll,
         openOptions: vi.fn<() => void>(),
       },
-      { autoTranslate: true, privateRepositories: [] },
+      { autoTranslate: true, privateRepositories: [], providerLabel: "DeepSeek" },
     );
     controller.sync();
     await settle();

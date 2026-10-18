@@ -6,8 +6,13 @@ export default defineConfig({
   imports: false,
   manifest: {
     name: "Octo Translator",
-    description: "GitHub のプルリクエストのタイトルと本文を Gemini で日本語に翻訳します",
+    description: "GitHub のプルリクエストのタイトルと本文を日本語に翻訳します",
     permissions: ["storage"],
-    host_permissions: ["https://generativelanguage.googleapis.com/*"],
+    // The provider endpoints only (KEY-2): `ENDPOINTS` in src/lib/responses.ts and `ENDPOINT` in src/lib/gemini.ts.
+    host_permissions: [
+      "https://api.deepseek.com/*",
+      "https://api.openai.com/*",
+      "https://generativelanguage.googleapis.com/*",
+    ],
   },
 });

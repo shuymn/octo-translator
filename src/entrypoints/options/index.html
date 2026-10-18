@@ -11,7 +11,26 @@
       <h1>Octo Translator の設定</h1>
       <form id="settings" novalidate>
         <div class="field">
-          <label for="api-key">Gemini API キー</label>
+          <label for="provider">翻訳に使うサービス</label>
+          <select id="provider" name="provider"></select>
+        </div>
+
+        <div class="field">
+          <label for="model">モデル</label>
+          <select id="model" name="model"></select>
+        </div>
+
+        <div class="field">
+          <label for="thinking">思考の深さ</label>
+          <select id="thinking" name="thinking" aria-describedby="thinking-help thinking-error"></select>
+          <p id="thinking-help" class="hint">
+            深くすると訳が自然になることがありますが、時間と費用がかかります。選べるのはモデルが対応している深さだけです。
+          </p>
+          <p id="thinking-error" class="error" aria-live="polite"></p>
+        </div>
+
+        <div class="field">
+          <label id="api-key-label" for="api-key">API キー</label>
           <input
             id="api-key"
             name="apiKey"
@@ -22,10 +41,7 @@
             spellcheck="false"
             aria-describedby="api-key-help"
           />
-          <p id="api-key-help" class="hint">
-            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Google AI Studio</a>
-            で発行したキーです。このブラウザーにだけ保存され、Gemini API への送信にだけ使います。
-          </p>
+          <p id="api-key-help" class="hint"></p>
         </div>
 
         <div class="field checkbox">
@@ -50,8 +66,7 @@
           ></textarea>
           <p id="private-repositories-help" class="hint">
             1 行に 1 つ、<code>owner/repo</code>
-            の形で書きます。無料枠に送った内容は Google
-            の製品改善に使われることがあるため、非公開リポジトリはここに書いたものだけを翻訳します。
+            の形で書きます。翻訳する内容は選んだサービスに送られ、サービスによっては保存や学習に使われることがあるため、非公開リポジトリはここに書いたものだけを翻訳します。
           </p>
           <p id="private-repositories-error" class="error" aria-live="polite"></p>
         </div>

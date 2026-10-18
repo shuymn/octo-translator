@@ -2,10 +2,10 @@ import * as v from "valibot";
 import { browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import { PageController, type Settings } from "../lib/controller.ts";
-import { PROVIDER_LABEL } from "../lib/gemini.ts";
-import { TranslationResultSchema, type SourceSegment, type TranslationResult } from "../lib/translation.ts";
 import type { Message } from "../lib/messages.ts";
-import { autoTranslateItem, privateRepositoriesItem } from "../lib/settings.ts";
+import { PROVIDER_SPECS, resolveChoice } from "../lib/providers.ts";
+import { autoTranslateItem, modelChoiceItem, privateRepositoriesItem } from "../lib/settings.ts";
+import { TranslationResultSchema, type SourceSegment, type TranslationResult } from "../lib/translation.ts";
 
 async function requestTranslation(key: string, segments: SourceSegment[]): Promise<TranslationResult> {
   const message: Message = { type: "translate", key, segments };
@@ -27,6 +27,8 @@ async function readSettings(): Promise<Settings> {
   return {
     autoTranslate: await autoTranslateItem.getValue(),
     privateRepositories: await privateRepositoriesItem.getValue(),
+    // The provider only, to name it on the page; the keys stay with the background (KEY-1).
+    providerLabel: PROVIDER_SPECS[resolveChoice(await modelChoiceItem.getValue()).provider].label,
   };
 }
 
@@ -37,18 +39,12 @@ export default defineContentScript({
   runAt: "document_idle",
   async main(ctx) {
     const controller = new PageController(
-      {
-        doc: document,
-        pathname: () => location.pathname,
-        providerLabel: PROVIDER_LABEL,
-        translate: requestTranslation,
-        openOptions,
-      },
+      { doc: document, pathname: () => location.pathname, translate: requestTranslation, openOptions },
       await readSettings(),
     );
 
     const refresh = () => void readSettings().then((settings) => controller.updateSettings(settings));
-    const unwatch = [autoTranslateItem.watch(refresh), privateRepositoriesItem.watch(refresh)];
+    const unwatch = [autoTranslateItem, privateRepositoriesItem, modelChoiceItem].map((item) => item.watch(refresh));
 
     // One sync per frame, however many mutations GitHub makes in it.
     let scheduled = false;

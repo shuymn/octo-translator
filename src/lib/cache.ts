@@ -5,6 +5,8 @@ import type { SourceSegment } from "./translation.ts";
 export type CacheEntry = {
   // SHA-256 of the segments sent, so an edited title or description is translated again.
   hash: string;
+  // The provider, model and thinking level that made it (`choiceKey`), so another choice translates again.
+  model: string;
   translations: string[];
   savedAt: number;
 };
@@ -19,9 +21,9 @@ export async function hashSegments(segments: SourceSegment[]): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function lookup(cache: Cache, key: string, hash: string): string[] | undefined {
+export function lookup(cache: Cache, key: string, hash: string, model: string): string[] | undefined {
   const entry = cache[key];
-  return entry?.hash === hash ? entry.translations : undefined;
+  return entry?.hash === hash && entry.model === model ? entry.translations : undefined;
 }
 
 // Answers a new cache with the entry stored, keeping the newest entries that fit in the budget.

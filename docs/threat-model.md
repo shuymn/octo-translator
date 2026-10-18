@@ -34,7 +34,7 @@ ID.
 
 - One user, the owner, who installs the extension unpacked in their own Chrome and is signed in to GitHub there.
 - The extension runs a content script on `https://github.com/*` and a background service worker. It has the `storage`
-  permission and host access to the model provider's API only.
+  permission and host access to the model providers' APIs only (DeepSeek, OpenAI, Gemini).
 - Today the background calls the model provider directly with the owner's API key. From stage 2, it calls the owner's
   Worker instead, which holds the provider keys and a GitHub token with read access to the owner's repositories.
 - From stage 3, one Durable Object per GitHub repository runs a Pi agent and keeps that repository's wiki in its own
@@ -71,17 +71,17 @@ translating comments or review threads, and storing translations anywhere the ow
 
 ## Entry points
 
-| Entry point                                         | Reached by | Trusted after                                                 | Status and code                                                            |
-| --------------------------------------------------- | ---------- | ------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| The pull request's title and description in the DOM | R1         | never; read as text, sent as data                             | main: `src/lib/pr-page.ts`, `src/lib/segments.ts`                          |
-| Model responses                                     | R2         | schema check, then marker check per segment (DOM-1)           | main: `src/lib/gemini.ts`, `src/lib/translation.ts`, `src/lib/segments.ts` |
-| Runtime messages to the background                  | R3         | sender is this extension, schema check (MSG-1)                | main: `src/entrypoints/background.ts`, `src/lib/messages.ts`               |
-| Responses from the background to the content script | R3         | schema check                                                  | main: `src/entrypoints/github.content.ts`                                  |
-| The options page                                    | owner      | form validation                                               | main: `src/entrypoints/options/`                                           |
-| Worker routes                                       | R4         | Cloudflare Access, then the Access JWT (AUTH-1)               | Planned (2)                                                                |
-| Scheduled GitHub search and pull request bodies     | R1         | never; read as text                                           | Planned (2)                                                                |
-| Agent tools and the wiki                            | R1, R2     | tools are read-only except the wiki writer (WIKI-1, WIKI-2)   | Planned (3)                                                                |
-| Build, CI and dependency updates                    | R6         | lockfile, release age, exact versions, pinned Actions (SUP-1) | main: `package.json`, `pnpm-workspace.yaml`, `.github/workflows/`          |
+| Entry point                                         | Reached by | Trusted after                                                 | Status and code                                                                                    |
+| --------------------------------------------------- | ---------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| The pull request's title and description in the DOM | R1         | never; read as text, sent as data                             | main: `src/lib/pr-page.ts`, `src/lib/segments.ts`                                                  |
+| Model responses                                     | R2         | schema check, then marker check per segment (DOM-1)           | main: `src/lib/responses.ts`, `src/lib/gemini.ts`, `src/lib/translation.ts`, `src/lib/segments.ts` |
+| Runtime messages to the background                  | R3         | sender is this extension, schema check (MSG-1)                | main: `src/entrypoints/background.ts`, `src/lib/messages.ts`                                       |
+| Responses from the background to the content script | R3         | schema check                                                  | main: `src/entrypoints/github.content.ts`                                                          |
+| The options page                                    | owner      | form validation; the provider choice by `parseChoice`         | main: `src/entrypoints/options/`, `src/lib/providers.ts`                                           |
+| Worker routes                                       | R4         | Cloudflare Access, then the Access JWT (AUTH-1)               | Planned (2)                                                                                        |
+| Scheduled GitHub search and pull request bodies     | R1         | never; read as text                                           | Planned (2)                                                                                        |
+| Agent tools and the wiki                            | R1, R2     | tools are read-only except the wiki writer (WIKI-1, WIKI-2)   | Planned (3)                                                                                        |
+| Build, CI and dependency updates                    | R6         | lockfile, release age, exact versions, pinned Actions (SUP-1) | main: `package.json`, `pnpm-workspace.yaml`, `.github/workflows/`                                  |
 
 ## Invariants
 
@@ -106,18 +106,24 @@ translating comments or review threads, and storing translations anywhere the ow
 
 ### Credentials (KEY)
 
-- **KEY-1: the API key is kept in `storage.local` and read only by the background and the options page.** It is never
-  in `storage.sync` (which copies it to every signed-in browser), and the content script never reads it. _Enforced
-  (main):_ `apiKeyItem` in `src/lib/settings.ts`. _Pinned by source analysis, forbidden pattern:_
-  `src/lib/source-analysis.test.ts` refuses `storage.sync` and `sync:` storage keys under `src`, refuses any
-  reference to `apiKeyItem` outside `src/lib/settings.ts`, `src/entrypoints/background.ts` and
-  `src/entrypoints/options/main.ts`, and refuses the key's storage name (`apiKey`, `local:apiKey`) as a string outside
-  `src/lib/settings.ts`. A bulk read of `storage.local` is not caught; the accepted risk below covers it.
-- **KEY-2: the key travels only in a request header to the provider.** It is sent as `x-goog-api-key` to the Gemini
-  endpoint, never in a URL, and the extension's only host permission is that endpoint. _Enforced (main):_
-  `translateSegments` in `src/lib/gemini.ts`, `host_permissions` in `wxt.config.ts`; `src/lib/gemini.test.ts` ("KEY-2":
-  the URL has no key, the header has it). _Pinned by behavior._ The Responses API client sends `Authorization: Bearer`
-  the same way: _Planned (1)._
+- **KEY-1: the API keys are kept in `storage.local` and read only by the background and the options page.** One key
+  per provider; none is ever in `storage.sync` (which copies it to every signed-in browser), and the content script
+  never reads one. It reads only the provider choice, to name the provider. The key items live in their own module,
+  because WXT reads an item's value as soon as it is defined: importing the module at all reads every key. _Enforced
+  (main):_ `apiKeyItems` in `src/lib/api-keys.ts`, imported only by `src/entrypoints/background.ts` and
+  `src/entrypoints/options/main.ts`. _Pinned by source analysis, forbidden pattern:_ `src/lib/source-analysis.test.ts`
+  refuses `storage.sync` and `sync:` storage keys under `src`; refuses an import of `api-keys` (static, dynamic or
+  re-export) outside those two files, and any reference to `apiKeyItems` (or `apiKeyItem`) outside them and
+  `src/lib/api-keys.ts`; and refuses a key's storage name (any string ending in `apiKey`, such as `local:apiKey` or
+  `local:deepseekApiKey`) outside `src/lib/api-keys.ts`. A bulk read of `storage.local` is not caught; the accepted risk
+  below covers it.
+- **KEY-2: a key travels only in a request header to its own provider.** Gemini's is sent as `x-goog-api-key` to the
+  Gemini endpoint, DeepSeek's and OpenAI's as `Authorization: Bearer` to their Responses API endpoints; never in a URL
+  or the body. Endpoints are constants per provider, not settings, and the extension's only host permissions are those
+  three endpoints. _Enforced (main):_ `translateSegments` in `src/lib/gemini.ts`, `ENDPOINTS` and `translateResponses`
+  in `src/lib/responses.ts`, `translateWith` in `src/lib/clients.ts`, `host_permissions` in `wxt.config.ts`;
+  `src/lib/gemini.test.ts` and `src/lib/responses.test.ts` ("KEY-2": the URL has no key, the header has it) and
+  `src/lib/clients.test.ts` ("KEY-2": each provider's request goes to that provider's endpoint). _Pinned by behavior._
 - **KEY-3: from stage 2, provider keys and the GitHub token live only on Cloudflare.** They are Worker secrets or AI
   Gateway provider keys; the extension holds only the Access service token, and the agent receives neither keys nor
   the token, only tools that use them. _Planned (2)_ for the Worker, _Planned (3)_ for the agent.
@@ -146,20 +152,22 @@ translating comments or review threads, and storing translations anywhere the ow
   `extractSegments` in `src/lib/segments.ts`; `src/lib/controller.test.ts` ("PRIV-2": the exact segments sent) and
   `src/lib/segments.test.ts` ("PRIV-2": code blocks are skipped, inline code and mentions become markers). _Pinned by
   behavior._
-- **PRIV-3: requests ask the provider not to keep them.** Gemini requests set `store: false`. _Enforced (main):_
-  `buildRequestBody` in `src/lib/gemini.ts`; `src/lib/gemini.test.ts` ("PRIV-3"). _Pinned by behavior._ DeepSeek's
-  handling of requests is not documented on its pricing page; private repositories are off by default for it until its
-  terms are checked: _Planned (1)._
+- **PRIV-3: requests ask the provider not to keep them.** Gemini and Responses API requests set `store: false`.
+  DeepSeek documents that it does not support `store` and always answers `store: false`; that says nothing about how
+  long it keeps requests, which is not verified (see the accepted risks). _Enforced (main):_ `buildRequestBody` in
+  `src/lib/gemini.ts`, `buildResponsesBody` in `src/lib/responses.ts`; `src/lib/gemini.test.ts` and
+  `src/lib/responses.test.ts` ("PRIV-3"). _Pinned by behavior._
 
 ### Resources and cost (RES)
 
 - **RES-1: a request is bounded.** At most 40,000 characters of source text per request, and a 120-second timeout.
   _Enforced (main):_ `MAX_SOURCE_CHARACTERS` and `sourceTooLong` in `src/lib/translation.ts`, `TIMEOUT_MS` in
-  `src/lib/gemini.ts`; `src/lib/translation.test.ts` ("RES-1": the limit counts every segment) and
-  `src/lib/gemini.test.ts` ("RES-1": too much text is refused before any request). _Pinned by behavior._ _Gap: the
-  timeout is not exercised by a test._
-- **RES-2: one request per pull request and text version.** Translations are cached by the hash of their segments;
-  callers that ask while the same request is in flight share it; the cache keeps at most 5 MB, newest first, and a
+  `src/lib/gemini.ts` and `src/lib/responses.ts`; `src/lib/translation.test.ts` ("RES-1": the limit counts every
+  segment), `src/lib/gemini.test.ts` and `src/lib/responses.test.ts` ("RES-1": too much text is refused before any
+  request). _Pinned by behavior._ _Gap: the timeout is not exercised by a test._
+- **RES-2: one request per pull request, text version and model.** Translations are cached by the hash of their
+  segments together with the provider, model and thinking level that made them, so another choice translates again
+  instead of answering an older provider's translation; callers that ask while the same request is in flight share it; the cache keeps at most 5 MB, newest first, and a
   failed cache write still answers the translation. _Enforced (main):_ `createTranslateService` in
   `src/lib/translate-service.ts`, `store` in `src/lib/cache.ts`; `src/lib/translate-service.test.ts` ("RES-2"). _Pinned
   by behavior._
@@ -212,13 +220,14 @@ translating comments or review threads, and storing translations anywhere the ow
 
 ## Accepted risks
 
-| Risk                                                                                   | Why accepted                                                                                                       | Revisit when                                          |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
-| A content script could read `storage.local`, where the API key is (KEY-1)              | Content scripts run in an isolated world the page cannot reach, and this content script does not reference the key | stage 2 moves the key off the extension               |
-| A pull request can steer its own translation with instructions aimed at the model (R1) | The output is only text shown to the owner (DOM-1); a wrong translation is visible next to the original            | translations are used for anything but reading        |
-| Public pull request text is sent to the model provider (R5)                            | It is public already                                                                                               | never                                                 |
-| The free Gemini tier may use requests to improve Google's products                     | Private repositories are opt-in (PRIV-1), and the owner chooses the key's project                                  | the owner translates private repositories with Gemini |
-| GitHub's markup changes break the selectors                                            | The extension then translates nothing; it does not fall back to wider selectors                                    | never                                                 |
+| Risk                                                                                                         | Why accepted                                                                                                                                       | Revisit when                                                  |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| A content script could read `storage.local` in bulk, where the API keys are (KEY-1)                          | Content scripts run in an isolated world the page cannot reach, and this content script neither imports the key items nor names their storage keys | stage 2 moves the key off the extension                       |
+| A pull request can steer its own translation with instructions aimed at the model (R1)                       | The output is only text shown to the owner (DOM-1); a wrong translation is visible next to the original                                            | translations are used for anything but reading                |
+| Public pull request text is sent to the model provider (R5)                                                  | It is public already                                                                                                                               | never                                                         |
+| The free Gemini tier may use requests to improve Google's products                                           | Private repositories are opt-in (PRIV-1), and the owner chooses the key's project                                                                  | the owner translates private repositories with Gemini         |
+| DeepSeek's retention and use of API requests is not verified; `store: false` is not supported there (PRIV-3) | Private repositories stay opt-in for every provider (PRIV-1); DeepSeek is the default for public pull requests                                     | the owner lists private repositories while DeepSeek is chosen |
+| GitHub's markup changes break the selectors                                                                  | The extension then translates nothing; it does not fall back to wider selectors                                                                    | never                                                         |
 
 ## How to use
 

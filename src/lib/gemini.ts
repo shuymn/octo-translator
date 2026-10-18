@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import type { ThinkingLevel } from "./providers.ts";
 import {
   errorCodeOfStatus,
   parseTranslations,
@@ -12,11 +13,10 @@ import {
 // The Interactions API, which Google recommends over generateContent for new projects.
 // https://ai.google.dev/gemini-api/docs/interactions
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions";
-export const MODEL = "gemini-3.8-flash";
-// How the page names the provider in its notes and error messages.
-export const PROVIDER_LABEL = "Gemini";
 // High thinking takes longer than a plain completion on a long description.
 const TIMEOUT_MS = 120_000;
+
+export type GeminiOptions = { model: string; thinking: ThinkingLevel };
 
 const InteractionSchema = v.object({
   status: v.string(),
@@ -28,9 +28,9 @@ const InteractionSchema = v.object({
   ),
 });
 
-export function buildRequestBody(segments: SourceSegment[]): unknown {
+export function buildRequestBody(segments: SourceSegment[], options: GeminiOptions): unknown {
   return {
-    model: MODEL,
+    model: options.model,
     system_instruction: SYSTEM_INSTRUCTION,
     input: JSON.stringify({ segments }),
     response_format: {
@@ -42,8 +42,8 @@ export function buildRequestBody(segments: SourceSegment[]): unknown {
         required: ["translations"],
       },
     },
-    // 3.8 Flash supports low, medium and high; high gives the most natural Japanese.
-    generation_config: { thinking_level: "high" },
+    // The levels each model takes are in `providers.ts`.
+    generation_config: { thinking_level: options.thinking },
     // Not kept on Google's side: nothing refers back to an earlier interaction.
     store: false,
   };
@@ -52,6 +52,7 @@ export function buildRequestBody(segments: SourceSegment[]): unknown {
 export async function translateSegments(
   segments: SourceSegment[],
   apiKey: string,
+  options: GeminiOptions,
   fetchFn: typeof fetch = fetch,
 ): Promise<TranslationResult> {
   if (apiKey === "") return { ok: false, code: "no-api-key" };
@@ -61,7 +62,7 @@ export async function translateSegments(
     response = await fetchFn(ENDPOINT, {
       method: "POST",
       headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify(buildRequestBody(segments)),
+      body: JSON.stringify(buildRequestBody(segments, options)),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch {
