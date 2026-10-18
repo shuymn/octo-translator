@@ -21,7 +21,7 @@ function setup(result: TranslationResult, overrides: Partial<TranslateDeps> = {}
   return { service, translate, cache: () => cache };
 }
 
-describe("createTranslateService", () => {
+describe("RES-2: createTranslateService", () => {
   test("translates once per pull request until its text changes", async () => {
     const { service, translate } = setup({ ok: true, translations: ["訳"] });
     await service("o/r#1", TEXT);
@@ -63,7 +63,7 @@ describe("createTranslateService", () => {
   });
 });
 
-test("store keeps the newest entries that fit in the byte budget", () => {
+test("RES-2: store keeps the newest entries that fit in the byte budget", () => {
   const translations = ["あ".repeat(100_000)];
   let cache: Cache = {};
   for (let index = 0; index < 20; index++) {

@@ -72,6 +72,7 @@ describe("PageController", () => {
     headerButton()?.click();
     await settle();
 
+    // PRIV-2: only the title and the description are sent, inline elements as markers.
     expect(prefixAll).toHaveBeenCalledWith("owner/repo#7", [
       { kind: "title", text: "Fix ⟦0⟧ crash" },
       { kind: "paragraph", text: "This fixes ⟦0⟧, see ⟦1⟧the docs⟦/1⟧." },
@@ -141,7 +142,7 @@ describe("PageController", () => {
     expect(headerButton()?.getAttribute("aria-pressed")).toBe("true");
   });
 
-  test("leaves a private repository alone unless it is listed", () => {
+  test("PRIV-1: leaves a private repository alone unless it is listed", () => {
     renderPage({ visibility: "false" });
     const { controller } = setup();
     expect(headerButton()).toBeNull();
@@ -151,7 +152,7 @@ describe("PageController", () => {
     expect(headerButton()).not.toBeNull();
   });
 
-  test("does not send a page GitHub has moved away from before the next sync", async () => {
+  test("PRIV-1: does not send a page GitHub has moved away from before the next sync", async () => {
     renderPage({ visibility: "false" });
     let pathname = "/owner/repo/pull/7";
     const controller = new PageController(
@@ -187,7 +188,7 @@ describe("PageController", () => {
     expect(openOptions).toHaveBeenCalled();
   });
 
-  test("keeps a part whose markers came back wrong in the original", async () => {
+  test("DOM-1: keeps a part whose markers came back wrong in the original", async () => {
     renderPage();
     setup({}, async () => ({ ok: true, translations: ["タイトル ⟦0⟧", "markers dropped"] }));
     headerButton()?.click();
