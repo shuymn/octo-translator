@@ -59,9 +59,18 @@ const HTML_SINKS: Rule = {
   name: "an HTML sink",
   pattern:
     /\b(?:innerHTML|outerHTML|insertAdjacentHTML|DOMParser|createContextualFragment|setHTMLUnsafe|parseHTMLUnsafe)\b|\bdocument\.write(?:ln)?\b/,
-  // The Worker runs `src/lib` too, and will walk `body_html` with a DOM (DOM-3).
+  // The Worker runs `src/lib` too, and walks `body_html` with a DOM (DOM-3).
   under: [...EXTENSION, ...WORKER],
   allowed: [],
+};
+
+// DOM-1, DOM-3: the Worker's HTML parser (linkedom, its `parseHTML` or its `DOMParser`, which HTML_SINKS refuses) is
+// used only where GitHub's `body_html` is parsed. Nothing else, a model's output above all, is parsed as HTML.
+const HTML_PARSER: Rule = {
+  name: "the HTML parser outside the body_html module",
+  pattern: /["'`]linkedom(?:\/[\w.-]+)?["'`]|\bparseHTML\b/,
+  under: [...EXTENSION, ...WORKER],
+  allowed: ["worker/src/pr-segments.ts"],
 };
 
 // KEY-1: nothing in storage.sync.
@@ -125,6 +134,7 @@ const UNBOUND_EXEC: Rule = {
 
 const RULES = [
   HTML_SINKS,
+  HTML_PARSER,
   SYNC_STORAGE,
   API_KEY_ITEM,
   API_KEY_MODULE,
@@ -156,12 +166,13 @@ describe("source analysis", () => {
         "src/entrypoints/options/main.ts",
         "worker/src/translations-db.ts",
         "worker/src/translate.ts",
+        "worker/src/pr-segments.ts",
       ]),
     );
   });
 
   test.each(RULES.map((rule) => [rule.name, rule] as const))(
-    "no file breaks the rule on %s (DOM-1, KEY-1, RES-3)",
+    "no file breaks the rule on %s (DOM-1, DOM-3, KEY-1, RES-3)",
     (_, rule) => {
       expect(violations(rule, sources)).toEqual([]);
     },
@@ -189,6 +200,25 @@ describe("source analysis", () => {
     // A `/*` inside a string does not open a comment that hides the sink after it.
     const glob = 'const matches = ["https://github.com/*"];\nel.innerHTML = text;\n/* Update the status. */';
     expect(violations(HTML_SINKS, { "src/x.ts": glob })).toEqual(["src/x.ts"]);
+  });
+
+  test("DOM-1: catches the HTML parser outside the body_html module", () => {
+    const fixtures = [
+      'import { parseHTML } from "linkedom";',
+      'import { parseHTML } from "linkedom/worker";',
+      "const { DOMParser } = await import('linkedom/worker');",
+      "const { document } = parseHTML(translation);",
+    ];
+    for (const fixture of fixtures) {
+      expect(
+        violations(HTML_PARSER, {
+          "src/x.ts": fixture,
+          "worker/src/translate.ts": fixture,
+          "worker/src/pr-segments.ts": fixture,
+        }),
+      ).toEqual(["src/x.ts", "worker/src/translate.ts"]);
+    }
+    expect(violations(HTML_PARSER, { "worker/src/x.ts": "const html = source.body_html;" })).toEqual([]);
   });
 
   test("KEY-1: catches storage.sync, and the secret items, their module and storage names outside their files", () => {

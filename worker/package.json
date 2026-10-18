@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "jose": "6.2.12",
+    "linkedom": "0.18.13",
     "valibot": "1.5.0"
   },
   "devDependencies": {

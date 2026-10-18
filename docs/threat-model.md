@@ -80,20 +80,21 @@ translating comments or review threads, and storing translations anywhere the ow
 
 ## Entry points
 
-| Entry point                                          | Reached by | Trusted after                                                                             | Status and code                                                                                    |
-| ---------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| The pull request's title and description in the DOM  | R1         | never; read as text, sent as data                                                         | main: `src/lib/pr-page.ts`, `src/lib/segments.ts`                                                  |
-| Model responses                                      | R2         | schema check, then marker check per segment (DOM-1)                                       | main: `src/lib/responses.ts`, `src/lib/gemini.ts`, `src/lib/translation.ts`, `src/lib/segments.ts` |
-| Runtime messages to the background                   | R3         | sender is this extension, schema check (MSG-1)                                            | main: `src/entrypoints/background.ts`, `src/lib/messages.ts`                                       |
-| The Worker's answers to the background               | R2, R4     | status 200, `TranslationResultSchema`, one translation per segment, then DOM-1            | main: `src/lib/worker-client.ts`                                                                   |
-| Responses from the background to the content script  | R3         | schema check                                                                              | main: `src/entrypoints/github.content.ts`                                                          |
-| The options page                                     | owner      | form validation; the provider choice by `parseChoice`, the Worker URL by `parseWorkerUrl` | main: `src/entrypoints/options/`, `src/lib/providers.ts`, `src/lib/worker-client.ts`               |
-| Worker routes (`GET /v1/ping`, `POST /v1/translate`) | R4         | Cloudflare Access, then the Access JWT (AUTH-1)                                           | main: `worker/src/handler.ts`, `worker/src/auth.ts`                                                |
-| The translate route's body                           | owner      | AUTH-1, then a byte limit and a schema check (RES-1)                                      | main: `worker/src/body.ts`, `worker/src/translate.ts`                                              |
-| Rows read back from D1                               | the Worker | schema check; a row that does not fit is a miss                                           | main: `worker/src/translations-db.ts`                                                              |
-| Scheduled GitHub search and pull request bodies      | R1         | never; read as text                                                                       | Planned (2)                                                                                        |
-| Agent tools and the wiki                             | R1, R2     | tools are read-only except the wiki writer (WIKI-1, WIKI-2)                               | Planned (3)                                                                                        |
-| Build, CI and dependency updates                     | R6         | lockfile, release age, exact versions, pinned Actions (SUP-1)                             | main: `package.json`, `worker/package.json`, `pnpm-workspace.yaml`, `.github/workflows/`           |
+| Entry point                                                     | Reached by | Trusted after                                                                                        | Status and code                                                                                    |
+| --------------------------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| The pull request's title and description in the DOM             | R1         | never; read as text, sent as data                                                                    | main: `src/lib/pr-page.ts`, `src/lib/segments.ts`                                                  |
+| Model responses                                                 | R2         | schema check, then marker check per segment (DOM-1)                                                  | main: `src/lib/responses.ts`, `src/lib/gemini.ts`, `src/lib/translation.ts`, `src/lib/segments.ts` |
+| Runtime messages to the background                              | R3         | sender is this extension, schema check (MSG-1)                                                       | main: `src/entrypoints/background.ts`, `src/lib/messages.ts`                                       |
+| The Worker's answers to the background                          | R2, R4     | status 200, `TranslationResultSchema`, one translation per segment, then DOM-1                       | main: `src/lib/worker-client.ts`                                                                   |
+| Responses from the background to the content script             | R3         | schema check                                                                                         | main: `src/entrypoints/github.content.ts`                                                          |
+| The options page                                                | owner      | form validation; the provider choice by `parseChoice`, the Worker URL by `parseWorkerUrl`            | main: `src/entrypoints/options/`, `src/lib/providers.ts`, `src/lib/worker-client.ts`               |
+| Worker routes (`GET /v1/ping`, `POST /v1/translate`)            | R4         | Cloudflare Access, then the Access JWT (AUTH-1)                                                      | main: `worker/src/handler.ts`, `worker/src/auth.ts`                                                |
+| The translate route's body                                      | owner      | AUTH-1, then a byte limit and a schema check (RES-1)                                                 | main: `worker/src/body.ts`, `worker/src/translate.ts`                                              |
+| Rows read back from D1                                          | the Worker | schema check; a row that does not fit is a miss                                                      | main: `worker/src/translations-db.ts`                                                              |
+| A pull request's `title` and `body_html` from GitHub's REST API | R1         | never; `body_html` parsed only by linkedom to be read as text, the title never parsed (DOM-1, DOM-3) | main: `worker/src/pr-segments.ts`, `src/lib/segments.ts`                                           |
+| Scheduled GitHub search, and fetching pull requests             | R1         | never; read as text                                                                                  | Planned (2)                                                                                        |
+| Agent tools and the wiki                                        | R1, R2     | tools are read-only except the wiki writer (WIKI-1, WIKI-2)                                          | Planned (3)                                                                                        |
+| Build, CI and dependency updates                                | R6         | lockfile, release age, exact versions, pinned Actions (SUP-1)                                        | main: `package.json`, `worker/package.json`, `pnpm-workspace.yaml`, `.github/workflows/`           |
 
 ## Invariants
 
@@ -108,13 +109,37 @@ translating comments or review threads, and storing translations anywhere the ow
   `src/lib/controller.test.ts` ("DOM-1": a part whose markers came back wrong stays in the original). _Pinned by
   behavior; and by source analysis, forbidden API:_ `src/lib/source-analysis.test.ts` refuses `innerHTML`,
   `outerHTML`, `insertAdjacentHTML`, `DOMParser`, `document.write`, `createContextualFragment` and the
-  `setHTMLUnsafe` family in every non-test file under `src`.
+  `setHTMLUnsafe` family in every non-test file under `src` and `worker/src`. The Worker builds no nodes for the page;
+  the one HTML it parses is GitHub's `body_html`, GitHub's sanitized rendering of the description, with linkedom, to
+  read its segments (DOM-3); the title is put in a tree with `createTextNode`, and nothing parsed is serialized or
+  stored. _Enforced (main):_ `pullRequestSegments` in `worker/src/pr-segments.ts`; `worker/src/pr-segments.test.ts`
+  ("DOM-1": markup in the title stays text; scripts, styles and templates in `body_html` add no segment), and
+  `src/lib/source-analysis.test.ts` refuses linkedom (any of its entry points) and `parseHTML` in every non-test file
+  under `src` and `worker/src` but `worker/src/pr-segments.ts`.
 - **DOM-2: the content script runs only on github.com.** Its only match pattern is `https://github.com/*`, and it acts
   only on a pull request's Conversation tab. _Enforced (main):_ `matches` in `src/entrypoints/github.content.ts`;
   `parsePullRequestPath` in `src/lib/pr-page.ts`. _Pinned by configuration._
 - **DOM-3: a translation made ahead of time is shown only for the exact segments it was made from.** The Worker keys
   stored translations by the SHA-256 of the segments; the extension asks with the hash of the segments it read from
-  the page, and a mismatch falls back to translating on request. _Planned (2)._
+  the page, and a mismatch falls back to translating on request. The Worker makes the segments of a pull request from
+  the REST API's `title` and `body_html` with the extension's own extraction (`extractPullRequestSegments`, which the
+  page controller uses too), run on linkedom; tag names are compared in upper case, because a browser gives an `svg`
+  or `math` element a lower-case one and linkedom an upper-case one. The served page's description was compared with
+  `body_html` on public pull requests, before and after GitHub's scripts ran: the HTML is the same apart from signed
+  image URLs, attributes the scripts add and code blocks' copy buttons, none of which changes a segment. The title is
+  raw text in the API (https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request documents `body_html` only), and
+  the page renders its code spans as `<code>`, so the Worker renders those the same way (CommonMark's rule).
+  _Enforced (main)_ for the segments: `extractPullRequestSegments` and `toSourceSegments` in `src/lib/segments.ts`,
+  used by `src/lib/controller.ts`; `pullRequestSegments` and `renderTitle` in `worker/src/pr-segments.ts`;
+  `src/lib/segments.test.ts` ("DOM-3": each shape's page markup on happy-dom) and `worker/src/pr-segments.test.ts`
+  ("DOM-3": the same shapes' `body_html` on linkedom in workerd) expect the same segments and the same written-out
+  hash, for paragraphs with inline code, links, mentions, references and emphasis, headings (with and without the
+  page's anchors), nested lists, task lists, tables, code and highlighted blocks, images, blockquotes, alerts, details
+  and Japanese text, from the fixtures in `src/lib/pr-shapes.fixtures.ts`; `src/lib/source-analysis.test.ts` keeps the
+  parser to that module. _Pinned by behavior._ _Gaps, which translate on request:_ an emoji shortcode in the title
+  (the page shows the emoji, the API the shortcode; pinned by both tests), math, which GitHub's scripts render in the
+  page after it is served (not compared), and markup only a signed-in author's page has, such as a
+  task list's drag handles, not compared. The ahead-of-time translation that stores under these hashes: _Planned (2)._
 
 ### Credentials (KEY)
 
@@ -313,7 +338,8 @@ translating comments or review threads, and storing translations anywhere the ow
 
 ## IDs to check by change type
 
-- **Segment extraction, markers or the controls:** DOM-1, PRIV-2. Keep the source analysis for HTML sinks passing.
+- **Segment extraction, markers or the controls:** DOM-1, DOM-3, PRIV-2. Keep the source analysis for HTML sinks and
+  the DOM-3 parity tests on both sides passing.
 - **Selectors or page detection:** DOM-2, PRIV-1, PRIV-2.
 - **A provider client or the prompt:** KEY-2, PRIV-3, RES-1. Check where the key goes and what is sent.
 - **Settings or storage:** KEY-1, KEY-4, RES-2.
