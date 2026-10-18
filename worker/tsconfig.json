@@ -6,7 +6,7 @@
     "moduleDetection": "force",
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
-    "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
