@@ -4,6 +4,9 @@
  * https://developers.cloudflare.com/d1/worker-api/prepared-statements/
  */
 import * as v from "valibot";
+import { hashSegments } from "../../src/lib/cache.ts";
+import { choiceKey, type ModelChoice } from "../../src/lib/providers.ts";
+import type { SourceSegment } from "../../src/lib/translation.ts";
 
 export type StoredKey = {
   /** `owner/repo#number`. */
@@ -14,14 +17,25 @@ export type StoredKey = {
   readonly choice: string;
 };
 
+/**
+ * The key a translation is stored and looked up under, the same for the translate route and the schedule, so a
+ * translation made ahead of time answers the extension's request for the same segments (DOM-3, RES-2).
+ */
+export async function storedKey(prKey: string, segments: SourceSegment[], choice: ModelChoice): Promise<StoredKey> {
+  return { prKey, hash: await hashSegments(segments), choice: choiceKey(choice) };
+}
+
+export type SaveResult = "stored" | "superseded";
+
 export type TranslationStore = {
   /** The stored translations for exactly this key, if there are as many as `expected`. */
   lookup: (key: StoredKey, expected: number) => Promise<string[] | undefined>;
   /**
    * Stores the translations of a request made at `requestedAt`, and deletes the pull request's versions for the same
-   * choice requested earlier. A version requested later than this one already stored wins: this one is dropped.
+   * choice requested earlier. A version requested later than this one already stored wins: this one is dropped, and
+   * `superseded` is answered (also when the same version is stored by a later request).
    */
-  save: (key: StoredKey, translations: readonly string[], requestedAt: number) => Promise<void>;
+  save: (key: StoredKey, translations: readonly string[], requestedAt: number) => Promise<SaveResult>;
 };
 
 const SELECT_TRANSLATIONS =
@@ -63,7 +77,7 @@ export function createTranslationStore(db: D1Database, now: () => number): Trans
     },
     async save({ prKey, hash, choice }, translations, requestedAt) {
       // One batch is one transaction: the deletion and the conditional insert see the same rows.
-      await db.batch([
+      const [, stored] = await db.batch([
         db.prepare(DELETE_EARLIER_VERSIONS).bind(prKey, choice, hash, requestedAt),
         db
           .prepare(STORE_UNLESS_SUPERSEDED)
@@ -80,6 +94,7 @@ export function createTranslationStore(db: D1Database, now: () => number): Trans
             requestedAt,
           ),
       ]);
+      return stored?.meta.changes === 1 ? "stored" : "superseded";
     },
   };
 }

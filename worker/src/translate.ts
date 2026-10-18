@@ -4,15 +4,7 @@
  * (RES-1, RES-3); a stored translation answers without a provider call (RES-2).
  */
 import * as v from "valibot";
-import { hashSegments } from "../../src/lib/cache.ts";
-import {
-  choiceKey,
-  DEFAULT_CHOICE,
-  parseChoice,
-  PROVIDERS,
-  type ModelChoice,
-  type Provider,
-} from "../../src/lib/providers.ts";
+import { DEFAULT_CHOICE, parseChoice, PROVIDERS, type ModelChoice, type Provider } from "../../src/lib/providers.ts";
 import {
   sourceTooLong,
   SourceSegmentSchema,
@@ -21,7 +13,8 @@ import {
 } from "../../src/lib/translation.ts";
 import { readJsonBody } from "./body.ts";
 import { failure, translation } from "./http.ts";
-import { createTranslationStore } from "./translations-db.ts";
+import { errorName, logEvent } from "./log.ts";
+import { createTranslationStore, storedKey } from "./translations-db.ts";
 
 /**
  * Bytes of request body. The source text is at most `MAX_SOURCE_CHARACTERS` (40,000) characters; at three UTF-8 bytes
@@ -80,9 +73,9 @@ export async function handleTranslate(request: Request, env: unknown, deps: Tran
   // Taken before the lookup and the translation: the store orders text versions by when their request started (RES-2).
   const requestedAt = deps.now();
   const store = createTranslationStore(parsedEnv.output.DB, deps.now);
-  const stored = { prKey: key, hash: await hashSegments(segments), choice: choiceKey(choice) };
+  const stored = await storedKey(key, segments, choice);
   const cached = await store.lookup(stored, segments.length).catch((error: unknown) => {
-    logFailure("lookup", error);
+    logEvent("octo.translations.lookup.failed", { error: errorName(error) });
     return undefined;
   });
   if (cached !== undefined) return translation({ ok: true, translations: cached });
@@ -93,17 +86,12 @@ export async function handleTranslate(request: Request, env: unknown, deps: Tran
   if (!result.ok) return translation(result);
   await store.save(stored, result.translations, requestedAt).catch((error: unknown) => {
     // The store only saves requests; the translation is still good.
-    logFailure("save", error);
+    logEvent("octo.translations.save.failed", { error: errorName(error) });
   });
   return translation(result);
 }
 
-function apiKeyOf(env: Readonly<Record<string, unknown>>, provider: Provider): string | undefined {
+export function apiKeyOf(env: Readonly<Record<string, unknown>>, provider: Provider): string | undefined {
   const key = env[API_KEY_SECRETS[provider]];
   return typeof key === "string" && key !== "" ? key : undefined;
-}
-
-/** Logs that a D1 call failed, by the error's name only: no message, which could carry a statement or a value. */
-function logFailure(operation: string, error: unknown): void {
-  console.error(`translations ${operation} failed: ${error instanceof Error ? error.name : "unknown"}`);
 }

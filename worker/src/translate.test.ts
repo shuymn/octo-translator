@@ -256,7 +256,7 @@ describe("RES-2: stored translations", () => {
       status: 200,
       body: { ok: true, translations: ["訳: Add cache cleanup", "訳: Deletes old entries."] },
     });
-    expect(errors.mock.calls).toEqual([["translations save failed: Error"]]);
+    expect(errors.mock.calls).toEqual([['{"event":"octo.translations.save.failed","error":"Error"}']]);
   });
 });
 

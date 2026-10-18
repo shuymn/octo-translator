@@ -19,6 +19,10 @@
       "migrations_dir": "migrations",
     },
   ],
+  // The ahead-of-time translation of the owner's own pull requests (worker/src/scheduled.ts), every 15 minutes, in UTC.
+  // Its settings (GITHUB_TOKEN, PRIVATE_REPOSITORIES, AHEAD_OF_TIME_FILTER, AHEAD_OF_TIME_CHOICE) are not written here:
+  // they name the owner's repositories or are credentials (README.md, Worker). A run without a GitHub token fails.
+  "triggers": { "crons": ["*/15 * * * *"] },
   "secrets": {
     "required": ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD"],
   },

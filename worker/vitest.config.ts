@@ -18,6 +18,11 @@ export default defineConfig({
           DEEPSEEK_API_KEY: "",
           OPENAI_API_KEY: "",
           GEMINI_API_KEY: "",
+          // Nor is a GitHub token or a setting of the schedule: its tests pass their own, and the owner's never reach them.
+          GITHUB_TOKEN: "",
+          PRIVATE_REPOSITORIES: "",
+          AHEAD_OF_TIME_FILTER: "",
+          AHEAD_OF_TIME_CHOICE: "",
           // The migrations, read here in Node and applied in the runtime by `src/apply-migrations.ts`.
           TEST_MIGRATIONS: await readD1Migrations("./migrations"),
         },

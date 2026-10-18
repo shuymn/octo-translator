@@ -12,6 +12,20 @@ declare namespace Cloudflare {
     DEEPSEEK_API_KEY?: string;
     OPENAI_API_KEY?: string;
     GEMINI_API_KEY?: string;
+    /**
+     * KEY-5: the owner's GitHub token for the scheduled translation, a fine-grained token with read-only pull requests;
+     * checked by `parseScheduledConfig` (scheduled-config.ts). A secret.
+     */
+    GITHUB_TOKEN?: string;
+    /**
+     * PRIV-1: private repositories the schedule may translate, `owner/repo` separated by commas or spaces; empty means
+     * none. A secret, as it names private repositories. Checked by `parseScheduledConfig`.
+     */
+    PRIVATE_REPOSITORIES?: string;
+    /** The schedule's CEL filter (filter.ts); empty means every pull request that passes PRIV-1. A variable. */
+    AHEAD_OF_TIME_FILTER?: string;
+    /** The schedule's choice, `provider/model/thinking`; empty means the extension's default. A variable. */
+    AHEAD_OF_TIME_CHOICE?: string;
   }
 
   interface GlobalProps {

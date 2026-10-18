@@ -6,3 +6,10 @@ ACCESS_AUD=<application audience tag>
 DEEPSEEK_API_KEY=
 OPENAI_API_KEY=
 GEMINI_API_KEY=
+# The scheduled translation (README.md, Worker): a fine-grained GitHub token with read-only pull requests, the private
+# repositories it may translate (`owner/repo`, comma-separated; empty means none), a CEL filter (empty means all) and
+# the choice (`provider/model/thinking`; empty means the default). Run it locally with `curl "http://localhost:8787/cdn-cgi/local/scheduled"`.
+GITHUB_TOKEN=
+PRIVATE_REPOSITORIES=
+AHEAD_OF_TIME_FILTER=
+AHEAD_OF_TIME_CHOICE=
