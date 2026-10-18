@@ -12,8 +12,8 @@
     "lint:fix": "oxlint --type-aware --fix",
     "fmt": "oxfmt --check",
     "fmt:fix": "oxfmt",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "typecheck": "tsc --noEmit && pnpm --filter octo-translator-worker run typecheck",
+    "test": "vitest run && pnpm --filter octo-translator-worker run test"
   },
   "dependencies": {
     "valibot": "1.5.0"

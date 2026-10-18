@@ -37,6 +37,9 @@ ID.
   permission and host access to the model providers' APIs only (DeepSeek, OpenAI, Gemini).
 - Today the background calls the model provider directly with the owner's API key. From stage 2, it calls the owner's
   Worker instead, which holds the provider keys and a GitHub token with read access to the owner's repositories.
+- The Worker (`worker/`) is deployed by the owner behind a Cloudflare Access application whose policy admits the
+  extension's service token. The Access application, its policy and the service token are dashboard settings; the
+  repository holds none of their identifiers.
 - From stage 3, one Durable Object per GitHub repository runs a Pi agent and keeps that repository's wiki in its own
   SQLite database.
 
@@ -57,6 +60,7 @@ translating comments or review threads, and storing translations anywhere the ow
 | A4  | Text of private repositories and pull requests                           | Sending it to a provider discloses it to that provider, and the free tiers may train on it               |
 | A5  | The repository wiki, above all its glossary (stage 3)                    | Every later translation of the repository uses it; a planted entry misleads translations for a long time |
 | A6  | Cost: model tokens, Cloudflare requests, Durable Object time and storage | The owner pays                                                                                           |
+| A7  | The Worker's Access settings: team domain and application audience tag   | Not credentials, but they identify the owner's Cloudflare setup; Worker secrets, never in the repository |
 
 ## Adversaries
 
@@ -78,10 +82,10 @@ translating comments or review threads, and storing translations anywhere the ow
 | Runtime messages to the background                  | R3         | sender is this extension, schema check (MSG-1)                | main: `src/entrypoints/background.ts`, `src/lib/messages.ts`                                       |
 | Responses from the background to the content script | R3         | schema check                                                  | main: `src/entrypoints/github.content.ts`                                                          |
 | The options page                                    | owner      | form validation; the provider choice by `parseChoice`         | main: `src/entrypoints/options/`, `src/lib/providers.ts`                                           |
-| Worker routes                                       | R4         | Cloudflare Access, then the Access JWT (AUTH-1)               | Planned (2)                                                                                        |
+| Worker routes (`GET /v1/ping` so far)               | R4         | Cloudflare Access, then the Access JWT (AUTH-1)               | main: `worker/src/handler.ts`, `worker/src/auth.ts`                                                |
 | Scheduled GitHub search and pull request bodies     | R1         | never; read as text                                           | Planned (2)                                                                                        |
 | Agent tools and the wiki                            | R1, R2     | tools are read-only except the wiki writer (WIKI-1, WIKI-2)   | Planned (3)                                                                                        |
-| Build, CI and dependency updates                    | R6         | lockfile, release age, exact versions, pinned Actions (SUP-1) | main: `package.json`, `pnpm-workspace.yaml`, `.github/workflows/`                                  |
+| Build, CI and dependency updates                    | R6         | lockfile, release age, exact versions, pinned Actions (SUP-1) | main: `package.json`, `worker/package.json`, `pnpm-workspace.yaml`, `.github/workflows/`           |
 
 ## Invariants
 
@@ -186,7 +190,24 @@ translating comments or review threads, and storing translations anywhere the ow
 
 - **AUTH-1: the Worker answers only the owner's extension.** Cloudflare Access rejects requests without the service
   token, and the Worker also verifies the `Cf-Access-Jwt-Assertion` header with `jose` against the Access team's keys,
-  so a request that reaches the Worker another way is refused. _Planned (2)._
+  so a request that reaches the Worker another way is refused. Every request is verified before routing: the token's
+  RS256 signature against the keys published at `<team domain>/cdn-cgi/access/certs` (cached by jose's remote key set),
+  its `iss` (the team domain), its `aud` (the application's tag) and its `exp`, which must be present. A request without
+  the header is answered 401 and one with any other token 403, with a fixed body that does not say why; keys that cannot
+  be fetched refuse too. Missing or malformed settings (the team domain must be `https://<team>.cloudflareaccess.com`)
+  refuse every request with 500 before a token is read. _Enforced (main):_ `verifyAccess` and `remoteKeys` in
+  `worker/src/auth.ts`, `parseConfig` in `worker/src/config.ts`, `createHandler` in `worker/src/handler.ts`, wired in
+  `worker/src/index.ts`; `worker/src/auth.test.ts` ("AUTH-1": a valid token passes; a missing or empty header, another
+  audience or issuer, an expired token, one without `exp`, another key's signature, an unsigned token and a non-JWT are
+  refused; the keys are fetched once from the team's certs URL, and a failed fetch refuses) and
+  `worker/src/handler.test.ts` ("AUTH-1": refusals come before routing, on any path and method, with fixed answers; bad
+  settings refuse without reading the token) and `worker/src/index.test.ts` ("AUTH-1": the deployed entry point, with
+  the keys fetched through the runtime's `fetch` from the team's certs URL only, answers a valid token 200, no token
+  401, another key's token 403 and an unknown route 404, and refuses without settings). The tests run in the Workers
+  runtime with keys made locally and Access settings bound by `worker/vitest.config.ts`, over any `.dev.vars`. _Pinned
+  by behavior._ _Gap: the Access application and its service-token policy are
+  dashboard settings no test checks; the Worker accepts any token Access issued for the application, so the policy
+  decides who that is (the owner's service token only)._
 
 ### Repository wiki (WIKI)
 
@@ -206,8 +227,8 @@ translating comments or review threads, and storing translations anywhere the ow
 - **SUP-1: dependencies and tools are pinned.** Exact versions in `package.json`, a lockfile, a three-day minimum
   release age, the `mise.lock` checksums, and GitHub Actions pinned by commit SHA. Pi Durable and the Agents SDK are
   pinned exactly and updated by hand. Security mechanisms use established libraries (`jose` for JWTs). _Enforced
-  (main):_ `package.json`, `pnpm-workspace.yaml`, `mise.toml`, `mise.lock`, `.github/workflows/`. _Pinned by
-  configuration._
+  (main):_ `package.json`, `worker/package.json`, `pnpm-workspace.yaml`, `mise.toml`, `mise.lock`,
+  `.github/workflows/`. _Pinned by configuration._
 - **SUP-2: a committed secret is caught before it is merged.** A secret scan runs before each commit where the
   lefthook hooks are installed, and in CI on every pull request and push to `main` (the shared security workflow). CI
   finds a secret only after it is pushed; the key is then revoked, not just removed. _Enforced (main):_ `lefthook.yml`, `.github/workflows/security.yml`. _Pinned by

@@ -1,3 +1,7 @@
+# The extension is the root package; the Worker is a package of its own (docs/decisions.md).
+packages:
+  - worker
+
 # Wait three days (in minutes), matching the minimumReleaseAge of the shared Renovate preset.
 minimumReleaseAge: 4320
 
@@ -5,3 +9,4 @@ minimumReleaseAge: 4320
 allowBuilds:
   esbuild: false
   lefthook: false
+  workerd: false
