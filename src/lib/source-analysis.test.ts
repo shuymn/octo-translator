@@ -107,6 +107,15 @@ const API_KEY_NAME: Rule = {
   allowed: ["src/lib/api-keys.ts"],
 };
 
+// KEY-5: the GitHub token is read from the Worker's environment only by the schedule's configuration, which hands it
+// to the GitHub client alone.
+const GITHUB_TOKEN_SECRET: Rule = {
+  name: "the GitHub token secret",
+  pattern: /\bGITHUB_TOKEN\b/,
+  under: WORKER,
+  allowed: ["worker/src/scheduled-config.ts", "worker/src/env.d.ts"],
+};
+
 // RES-3: a statement is prepared only from a constant, so its values can only be bound.
 const PREPARED_FROM_CONSTANT: Rule = {
   name: "a statement prepared from anything but a constant",
@@ -139,6 +148,7 @@ const RULES = [
   API_KEY_ITEM,
   API_KEY_MODULE,
   API_KEY_NAME,
+  GITHUB_TOKEN_SECRET,
   PREPARED_FROM_CONSTANT,
   BUILT_SQL,
   UNBOUND_EXEC,
@@ -167,12 +177,14 @@ describe("source analysis", () => {
         "worker/src/translations-db.ts",
         "worker/src/translate.ts",
         "worker/src/pr-segments.ts",
+        "worker/src/scheduled-config.ts",
+        "worker/src/env.d.ts",
       ]),
     );
   });
 
   test.each(RULES.map((rule) => [rule.name, rule] as const))(
-    "no file breaks the rule on %s (DOM-1, DOM-3, KEY-1, RES-3)",
+    "no file breaks the rule on %s (DOM-1, DOM-3, KEY-1, KEY-5, RES-3)",
     (_, rule) => {
       expect(violations(rule, sources)).toEqual([]);
     },
@@ -268,6 +280,18 @@ describe("source analysis", () => {
         "src/lib/providers.ts": 'const url = "https://platform.openai.com/api-keys";',
       }),
     ).toEqual(["src/entrypoints/github.content.ts", "src/lib/settings.ts", "src/lib/controller.ts"]);
+  });
+
+  test("KEY-5: catches the GitHub token read outside the schedule's configuration", () => {
+    expect(
+      violations(GITHUB_TOKEN_SECRET, {
+        "worker/src/scheduled.ts": "const token = env.GITHUB_TOKEN;",
+        "worker/src/translate.ts": 'const token = env["GITHUB_TOKEN"];',
+        "worker/src/scheduled-config.ts": 'GITHUB_TOKEN: v.optional(v.string(), ""),',
+        "worker/src/env.d.ts": "GITHUB_TOKEN?: string;",
+        "worker/src/github.ts": "Authorization: `Bearer ${token}`,",
+      }),
+    ).toEqual(["worker/src/scheduled.ts", "worker/src/translate.ts"]);
   });
 
   test("RES-3: catches SQL built from strings, statements prepared from anything but a constant, and exec", () => {
