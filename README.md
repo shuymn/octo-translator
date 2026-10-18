@@ -13,6 +13,7 @@ and Gemini can be chosen in the options, with the model and thinking level.
 
 Security invariants and the threat model: [docs/threat-model.md](docs/threat-model.md).
 Library choices, the planned stages and the patterns the code follows: [docs/decisions.md](docs/decisions.md).
+Setting up, deploying and operating the Worker: [docs/operations.md](docs/operations.md).
 
 ## Use
 
@@ -64,9 +65,11 @@ Locally, requests do not pass through Access, so `wrangler dev` answers 401 unle
 configured team signed. `POST /v1/translate` takes `{ key: "owner/repo#1", segments: [...], choice? }` and answers the
 extension's `TranslationResult`; a provider without a key in `.dev.vars` answers `no-api-key`.
 
-The configuration names the D1 database but holds no database ID: deploying provisions the database and writes its ID
-into `worker/wrangler.jsonc`, a change to keep out of commits. The tests use their own local database with the
-migrations applied, and bind their own Access settings and empty provider keys, so `.dev.vars` never reaches them.
+`worker/wrangler.jsonc` names the D1 database but holds no database ID, route or account: those are deployment values
+in the gitignored `worker/wrangler.deploy.jsonc`, which `pnpm --filter octo-translator-worker run deploy` checks and
+merges before applying the remote migrations and deploying; secrets are set with `wrangler secret put`. See
+[docs/operations.md](docs/operations.md). The tests use their own local database with the migrations applied, and bind
+their own Access settings and empty provider keys, so `.dev.vars` never reaches them.
 
 The GitHub repository settings are declared in `.github/infra.yaml`; review them with `gh infra plan` and apply them
 with `gh infra apply`.
