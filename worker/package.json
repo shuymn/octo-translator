@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deploy": "node scripts/deploy.mjs"
   },
   "dependencies": {
     "@marcbachmann/cel-js": "8.0.0",
@@ -17,6 +18,7 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.2",
     "@cloudflare/workers-types": "5.20261015.1",
+    "jsonc-parser": "3.3.1",
     "typescript": "7.0.2",
     "vitest": "5.0.4",
     "wrangler": "4.151.0"

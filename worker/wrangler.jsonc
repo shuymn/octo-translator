@@ -1,17 +1,31 @@
+// The Worker's public configuration: bindings, the cron, the migrations directory and the logging settings.
+// Deployment values (the route, the D1 database_id, the account and the schedule's variables) live in the gitignored
+// wrangler.deploy.jsonc, merged in by scripts/deploy.mjs; secrets are set with `wrangler secret put`. See
+// docs/operations.md.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "octo-translator",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-12",
-  "observability": { "enabled": true },
+  // AUTH-1: the Worker is reached only on its route, behind Cloudflare Access: no workers.dev URL and no preview URLs,
+  // which Access would not cover unless configured for them.
+  "workers_dev": false,
+  "preview_urls": false,
+  // KEY-4, KEY-5: console output (logEvent only) is kept. Invocation logs are off: they record the request, whose
+  // headers carry the Access JWT and the service token. See docs/operations.md.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "invocation_logs": false },
+  },
   // No usage metrics from Wrangler for this project, in CI or locally.
   "send_metrics": false,
   // AUTH-1: the Access team domain (`https://<team>.cloudflareaccess.com`) and the Access application's audience tag.
   // They name the owner's Cloudflare setup, so they are not written in this public repository: set them with
   // `wrangler secret put` for the deployed Worker and in `.dev.vars` (see `.dev.vars.example`) for `wrangler dev`.
-  // RES-2, RES-3: the stored translations. No database ID is committed: `wrangler deploy` provisions the database and
-  // writes its ID here (https://developers.cloudflare.com/workers/wrangler/configuration/#automatic-provisioning); keep
-  // that change out of commits. Local development and the tests use a local database.
+  // RES-2, RES-3: the stored translations. The owner creates the database with
+  // `wrangler d1 create --no-update-config` before the first deployment, and its database_id is a deployment value
+  // (docs/operations.md). Local development and the tests use a local database.
   "d1_databases": [
     {
       "binding": "DB",
@@ -20,8 +34,8 @@
     },
   ],
   // The ahead-of-time translation of the owner's own pull requests (worker/src/scheduled.ts), every 15 minutes, in UTC.
-  // Its settings (GITHUB_TOKEN, PRIVATE_REPOSITORIES, AHEAD_OF_TIME_FILTER, AHEAD_OF_TIME_CHOICE) are not written here:
-  // they name the owner's repositories or are credentials (README.md, Worker). A run without a GitHub token fails.
+  // Its credentials and repository list (GITHUB_TOKEN, PRIVATE_REPOSITORIES) are secrets; its filter and choice
+  // (AHEAD_OF_TIME_FILTER, AHEAD_OF_TIME_CHOICE) are deployment values. A run without a GitHub token fails.
   "triggers": { "crons": ["*/15 * * * *"] },
   "secrets": {
     "required": ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD"],

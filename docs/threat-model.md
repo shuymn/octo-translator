@@ -46,6 +46,13 @@ ID.
 - The Worker (`worker/`) is deployed by the owner behind a Cloudflare Access application whose policy admits the
   extension's service token. The Access application, its policy and the service token are dashboard settings; the
   repository holds none of their identifiers.
+- The owner deploys with `pnpm --filter octo-translator-worker run deploy` ([operations.md](operations.md)), which
+  merges the public `worker/wrangler.jsonc` with the gitignored `worker/wrangler.deploy.jsonc` (the custom domain, the
+  account, the D1 `database_id` and the schedule's two variables, A10), applies the remote D1 migrations and deploys.
+  The Worker is reached only on that custom domain: it has no `workers.dev` URL and no preview URLs (AUTH-1), and its
+  invocation logs are off (KEY-4, KEY-5). The D1 database is created by the owner beforehand; the secrets (A2, A3, A7,
+  `PRIVATE_REPOSITORIES`) are set with `wrangler secret put` and never written to a file of the repository or the
+  deployment file.
 - From stage 3, one Durable Object per GitHub repository runs a Pi agent and keeps that repository's wiki in its own
   SQLite database.
 
@@ -69,6 +76,7 @@ translating comments or review threads, and storing translations anywhere the ow
 | A7  | The Worker's Access settings: team domain and application audience tag   | Not credentials, but they identify the owner's Cloudflare setup; Worker secrets, never in the repository |
 | A8  | The Worker's D1 database: pull request keys and their translations       | Private repositories' names and translated text; read only through the Worker, behind AUTH-1             |
 | A9  | The Access service token (client id and secret) in the extension         | It opens the Worker, which spends the owner's provider keys (A2, A6); in the extension's storage only    |
+| A10 | The deployment values: the custom domain, account id and D1 database id  | Not credentials, but they identify the owner's setup; in the gitignored deployment file, never committed |
 
 ## Adversaries
 
@@ -218,7 +226,13 @@ translating comments or review threads, and storing translations anywhere the ow
   read, fall back; refusals, 429 included, and a malformed body do not; no local key answers the Worker failure). _Pinned by behavior._ _Gap: the options page's
   permission request runs only in Chrome, inside the save click; no test drives it. Two pages saving the Worker at
   the same moment may leave a replaced origin's permission granted; it is unused, as the token goes only to the
-  stored origin._
+  stored origin._ On the Worker's side, neither the service token nor the Access JWT that replaces it is logged: the
+  Worker logs only `logEvent` lines, and Cloudflare's invocation logs, which record the request with heuristic header
+  redaction, are off (`observability.logs.invocation_logs` false in `worker/wrangler.jsonc`, which the deployment file
+  cannot change; [operations.md](operations.md#schedule-and-logs-key-4-key-5)). _Enforced (main):_
+  `worker/wrangler.jsonc`, `mergeDeployConfig` in `worker/scripts/deploy-config.ts`; `worker/src/deploy-config.test.ts`
+  ("KEY-4": invocation logs are off, and a deployment file setting `observability` is refused). _Pinned by behavior._
+  _Gap: that the deployed Worker's logs hold only `octo.*` lines is checked after deployment._
 
 - **KEY-5: the GitHub token goes only to GitHub's API, only in a header, and is the least the schedule needs.** It is
   the Worker secret `GITHUB_TOKEN`, read only by the schedule's configuration and passed only to the GitHub client,
@@ -237,8 +251,12 @@ translating comments or review threads, and storing translations anywhere the ow
   api.github.com with the token in its `Authorization` header only and `redirect: "manual"`, the provider request
   carries none of it, and log lines carry no token, key, repository or text). _Pinned by behavior; and by source
   analysis, forbidden pattern:_ `src/lib/source-analysis.test.ts` refuses `GITHUB_TOKEN` under `worker/src` outside
-  `worker/src/scheduled-config.ts` and `worker/src/env.d.ts`. _Gap: the token's scope is set in GitHub's settings,
-  which no test checks; the README says what to grant._
+  `worker/src/scheduled-config.ts` and `worker/src/env.d.ts`. It is set with `wrangler secret put` only: the deployment
+  script refuses any variable but the schedule's filter and choice, so the token cannot be deployed as a plain-text
+  variable, and invocation logs are off (KEY-4). _Enforced (main):_ `mergeDeployConfig` in
+  `worker/scripts/deploy-config.ts`; `worker/src/deploy-config.test.ts` ("KEY-5": `GITHUB_TOKEN` and
+  `PRIVATE_REPOSITORIES` as variables are refused). _Pinned by behavior._ _Gap: the token's scope is set in GitHub's
+  settings, which no test checks; [operations.md](operations.md#the-github-token) says what to grant._
 
 ### Messages (MSG)
 
@@ -365,9 +383,16 @@ translating comments or review threads, and storing translations anywhere the ow
   the keys fetched through the runtime's `fetch` from the team's certs URL only, answers a valid token 200, no token
   401, another key's token 403 and an unknown route 404, and refuses without settings). The tests run in the Workers
   runtime with keys made locally and Access settings bound by `worker/vitest.config.ts`, over any `.dev.vars`. _Pinned
-  by behavior._ _Gap: the Access application and its service-token policy are
+  by behavior._ The deployed Worker has no way in that Access does not cover: `workers_dev` and `preview_urls` are false
+  in `worker/wrangler.jsonc`, and the deployment file may set only the custom domain (every route on one host, no
+  wildcard), the account, the database id and the schedule's variables, never those settings. _Enforced (main):_
+  `worker/wrangler.jsonc`, `mergeDeployConfig` and `parseDeployArgs` in `worker/scripts/deploy-config.ts`, run by
+  `worker/scripts/deploy.mjs`; `worker/src/deploy-config.test.ts` ("AUTH-1": the public configuration has neither URL;
+  a deployment file setting them, a wildcard or second host, or a wrangler option that replaces the configuration is
+  refused). _Pinned by behavior._ _Gap: the Access application and its service-token policy are
   dashboard settings no test checks; the Worker accepts any token Access issued for the application, so the policy
-  decides who that is (the owner's service token only)._
+  decides who that is (the owner's service token only). That the application covers the whole custom domain is checked
+  after deployment ([operations.md](operations.md#deploy))._
 
 ### Repository wiki (WIKI)
 
@@ -404,25 +429,28 @@ translating comments or review threads, and storing translations anywhere the ow
 - **The extension's Worker client or its fallback:** KEY-4, KEY-2, RES-1, RES-2.
 - **Messages between the content script and the background:** MSG-1.
 - **The Worker (2):** AUTH-1, KEY-2, KEY-3, KEY-4, KEY-5, PRIV-1, DOM-3, RES-1 to RES-3. Keep the Worker's source analysis passing.
+- **The Worker's configuration or deployment script:** AUTH-1 (no way in outside Access), KEY-4 and KEY-5 (no
+  invocation logs, no secret as a variable), and no deployment value (A10) committed.
 - **The agent, its tools or the wiki (3):** WIKI-1 to WIKI-3, KEY-3, DOM-1 (its output is still a model's output).
 - **A new dependency or workflow:** SUP-1, SUP-2. Prefer a maintained, widely used library over custom security code,
   and record its version, age and license in the PR.
 
 ## Accepted risks
 
-| Risk                                                                                                                                                                     | Why accepted                                                                                                                                                                                          | Revisit when                                                     |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| The scheduled path orders versions by when their fetch started, and reads a tied second by creation time (RES-2, RES-3)                                                  | Out-of-order answers from GitHub or more than a page of pull requests sharing both seconds cost a translation on request or a second translation, never a wrong one                                   | the schedule translates for more than one owner                  |
-| A content script path the KEY-1 behavior test does not run (a click, a settings change) could read `storage.local` in bulk, where the API keys and the service token are | Content scripts run in an isolated world the page cannot reach; the content script neither imports the secret items nor names their storage keys, and its load and first sync are checked by behavior | stage 2 moves the keys off the extension                         |
-| While the Worker cannot be reached, the extension sends the text to the provider directly with its local key (KEY-4)                                                     | It is what the extension did before the Worker, with the same checks (PRIV-1, KEY-2); the owner opts out by leaving the local keys empty                                                              | KEY-3 removes the local keys                                     |
-| The service token is a long-lived secret in the browser profile                                                                                                          | A compromised profile is out of scope; the token opens only the Worker, and it is revoked from the Access dashboard                                                                                   | Access offers a shorter-lived credential for the extension       |
-| A pull request can steer its own translation with instructions aimed at the model (R1)                                                                                   | The output is only text shown to the owner (DOM-1); a wrong translation is visible next to the original                                                                                               | translations are used for anything but reading                   |
-| Public pull request text is sent to the model provider (R5)                                                                                                              | It is public already                                                                                                                                                                                  | never                                                            |
-| The free Gemini tier may use requests to improve Google's products                                                                                                       | Private repositories are opt-in (PRIV-1), and the owner chooses the key's project                                                                                                                     | the owner translates private repositories with Gemini            |
-| DeepSeek's retention and use of API requests is not verified; `store: false` is not supported there (PRIV-3)                                                             | Private repositories stay opt-in for every provider (PRIV-1); DeepSeek is the default for public pull requests                                                                                        | the owner lists private repositories while DeepSeek is chosen    |
-| The GitHub token is a long-lived secret on Cloudflare that reads the owner's pull requests, private ones included (KEY-5)                                                | A Worker secret, never logged or answered; fine-grained and read-only, scoped by the owner to the repositories to translate, with an expiry; a compromised Cloudflare account is out of scope         | GitHub offers a narrower credential for one user's pull requests |
-| A repository listed in the Worker's `PRIVATE_REPOSITORIES` is translated ahead of time whatever the extension's options list (PRIV-1)                                    | Both lists are the owner's own settings; the Worker cannot read the extension's                                                                                                                       | the lists are kept in one place                                  |
-| GitHub's markup changes break the selectors                                                                                                                              | The extension then translates nothing; it does not fall back to wider selectors                                                                                                                       | never                                                            |
+| Risk                                                                                                                                                                                           | Why accepted                                                                                                                                                                                          | Revisit when                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| The scheduled path orders versions by when their fetch started, and reads a tied second by creation time (RES-2, RES-3)                                                                        | Out-of-order answers from GitHub or more than a page of pull requests sharing both seconds cost a translation on request or a second translation, never a wrong one                                   | the schedule translates for more than one owner                                |
+| A content script path the KEY-1 behavior test does not run (a click, a settings change) could read `storage.local` in bulk, where the API keys and the service token are                       | Content scripts run in an isolated world the page cannot reach; the content script neither imports the secret items nor names their storage keys, and its load and first sync are checked by behavior | stage 2 moves the keys off the extension                                       |
+| While the Worker cannot be reached, the extension sends the text to the provider directly with its local key (KEY-4)                                                                           | It is what the extension did before the Worker, with the same checks (PRIV-1, KEY-2); the owner opts out by leaving the local keys empty                                                              | KEY-3 removes the local keys                                                   |
+| The service token is a long-lived secret in the browser profile                                                                                                                                | A compromised profile is out of scope; the token opens only the Worker, and it is revoked from the Access dashboard                                                                                   | Access offers a shorter-lived credential for the extension                     |
+| A pull request can steer its own translation with instructions aimed at the model (R1)                                                                                                         | The output is only text shown to the owner (DOM-1); a wrong translation is visible next to the original                                                                                               | translations are used for anything but reading                                 |
+| Public pull request text is sent to the model provider (R5)                                                                                                                                    | It is public already                                                                                                                                                                                  | never                                                                          |
+| The free Gemini tier may use requests to improve Google's products                                                                                                                             | Private repositories are opt-in (PRIV-1), and the owner chooses the key's project                                                                                                                     | the owner translates private repositories with Gemini                          |
+| DeepSeek's retention and use of API requests is not verified; `store: false` is not supported there (PRIV-3)                                                                                   | Private repositories stay opt-in for every provider (PRIV-1); DeepSeek is the default for public pull requests                                                                                        | the owner lists private repositories while DeepSeek is chosen                  |
+| The GitHub token is a long-lived secret on Cloudflare that reads the owner's pull requests, private ones included (KEY-5)                                                                      | A Worker secret, never logged or answered; fine-grained and read-only, scoped by the owner to the repositories to translate, with an expiry; a compromised Cloudflare account is out of scope         | GitHub offers a narrower credential for one user's pull requests               |
+| A repository listed in the Worker's `PRIVATE_REPOSITORIES` is translated ahead of time whatever the extension's options list (PRIV-1)                                                          | Both lists are the owner's own settings; the Worker cannot read the extension's                                                                                                                       | the lists are kept in one place                                                |
+| Before the first deployment, the first `wrangler secret put` creates the Worker as wrangler's placeholder script, whose `workers.dev` URL may be on until the deployment turns it off (AUTH-1) | The placeholder's code reads no binding or secret and answers no data; the first deployment follows the secrets ([operations.md](operations.md#secrets))                                              | wrangler can set secrets on a Worker that does not exist without a placeholder |
+| GitHub's markup changes break the selectors                                                                                                                                                    | The extension then translates nothing; it does not fall back to wider selectors                                                                                                                       | never                                                                          |
 
 ## How to use
 

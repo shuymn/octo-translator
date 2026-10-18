@@ -1,0 +1,18 @@
+// Copy to wrangler.deploy.jsonc (gitignored) and replace every value. scripts/deploy.mjs checks it and merges it into
+// wrangler.jsonc; it may set only these keys. Secrets never go here: set them with `wrangler secret put`. See
+// docs/operations.md.
+{
+  // Optional: the account to deploy to, when the logged-in user has more than one. Leave the key out otherwise.
+  "account_id": "<ACCOUNT_ID>",
+  // The Worker's custom domain, the host the Access application covers (AUTH-1). Every route must be on that one host.
+  "routes": [{ "pattern": "translate.example.com", "custom_domain": true }],
+  // The database created with `wrangler d1 create octo-translator --no-update-config`: the database_id it printed.
+  "d1_databases": [{ "binding": "DB", "database_id": "<DATABASE_ID>" }],
+  // Optional: the schedule's settings, neither a secret. Leave a value empty, or the key out, for the default.
+  "vars": {
+    // A CEL expression over one pull request (worker/src/filter.ts); empty translates every pull request PRIV-1 allows.
+    "AHEAD_OF_TIME_FILTER": "pr.draft == false",
+    // provider/model/thinking, as the extension offers it; empty means the extension's default.
+    "AHEAD_OF_TIME_CHOICE": "",
+  },
+}

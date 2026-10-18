@@ -80,8 +80,11 @@ function parseAllowlist(setting: string): ReadonlySet<string> | undefined {
   return entries.every((entry) => REPOSITORY.test(entry)) ? new Set(entries) : undefined;
 }
 
-/** `provider/model/thinking`, as `choiceKey` writes it; empty means the extension's default choice. */
-function parseChoiceSetting(setting: string): ModelChoice | undefined {
+/**
+ * `provider/model/thinking`, as `choiceKey` writes it; empty means the extension's default choice. Also run by the
+ * deployment script (worker/scripts/deploy-config.ts), so a deployed choice is one the schedule accepts.
+ */
+export function parseChoiceSetting(setting: string): ModelChoice | undefined {
   if (setting.trim() === "") return DEFAULT_CHOICE;
   const [provider, model, thinking, ...rest] = setting.trim().split("/");
   if (rest.length > 0) return undefined;
