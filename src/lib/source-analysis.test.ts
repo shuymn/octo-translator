@@ -160,9 +160,11 @@ describe("source analysis", () => {
     ).toEqual(["src/entrypoints/github.content.ts", "src/lib/settings.ts", "src/lib/controller.ts"]);
   });
 
-  test("MSG-1: the background checks the sender and parses every message", () => {
+  // The handler's checks are pinned by behavior in message-handler.test.ts; this pins the wiring no test runs.
+  test("MSG-1: the background listens with the message handler and its own runtime id", () => {
     const background = code(sources["src/entrypoints/background.ts"] ?? "");
-    expect(background).toMatch(/sender\.id\s*!==\s*browser\.runtime\.id/);
-    expect(background).toMatch(/safeParse\(\s*MessageSchema\s*,/);
+    expect(background).toMatch(/onMessage\.addListener\(\s*createMessageHandler\(/);
+    expect(background).toMatch(/runtimeId:\s*browser\.runtime\.id\b/);
+    expect(background.match(/onMessage\.addListener\(/g)).toHaveLength(1);
   });
 });
