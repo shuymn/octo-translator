@@ -33,9 +33,18 @@ const ERROR_MESSAGES: Record<TranslationError, (provider: string) => string> = {
   network: (provider) => `${provider} API に接続できませんでした。`,
   "api-error": (provider) => `${provider} API がエラーを返しました。`,
   "invalid-response": () => "翻訳結果を読み取れませんでした。",
+  "worker-rejected": () =>
+    "Worker が翻訳を受け付けませんでした。設定の Worker の URL とサービストークンを確認してください。",
+  "worker-unreachable": (provider) =>
+    `Worker に接続できませんでした。${provider} の API キーを設定すると、そのあいだはこのブラウザーから翻訳します。`,
 };
 
-const SETTINGS_ERRORS: ReadonlySet<TranslationError> = new Set(["no-api-key", "api-key-rejected"]);
+const SETTINGS_ERRORS: ReadonlySet<TranslationError> = new Set([
+  "no-api-key",
+  "api-key-rejected",
+  "worker-rejected",
+  "worker-unreachable",
+]);
 
 // "none": nothing on the page needs translating, so no control is shown.
 type Phase =

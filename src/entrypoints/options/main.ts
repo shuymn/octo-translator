@@ -1,4 +1,5 @@
-import { apiKeyItems } from "../../lib/api-keys.ts";
+import { browser } from "wxt/browser";
+import { apiKeyItems, workerAccessItem } from "../../lib/api-keys.ts";
 import {
   defaultChoice,
   parseChoice,
@@ -13,6 +14,14 @@ import {
 import { editedKeys, type Keys } from "../../lib/key-edits.ts";
 import { parseRepositoryList } from "../../lib/repositories.ts";
 import { autoTranslateItem, modelChoiceItem, privateRepositoriesItem } from "../../lib/settings.ts";
+import { originPattern, storedAccess } from "../../lib/worker-client.ts";
+import {
+  planWorkerSave,
+  storeWorker,
+  workerForm,
+  type WorkerForm,
+  type WorkerFormError,
+} from "../../lib/worker-edits.ts";
 
 function field<T extends HTMLElement>(selector: string, type: new () => T): T {
   const element = document.querySelector(selector);
@@ -31,7 +40,21 @@ const apiKeyHelp = field("#api-key-help", HTMLElement);
 const autoTranslate = field("#auto-translate", HTMLInputElement);
 const repositories = field("#private-repositories", HTMLTextAreaElement);
 const repositoriesError = field("#private-repositories-error", HTMLElement);
+const workerUrl = field("#worker-url", HTMLInputElement);
+const workerClientId = field("#worker-client-id", HTMLInputElement);
+const workerClientSecret = field("#worker-client-secret", HTMLInputElement);
+const workerError = field("#worker-error", HTMLElement);
 const status = field("#status", HTMLElement);
+
+const workerInputs: Record<keyof WorkerForm, HTMLInputElement> = {
+  url: workerUrl,
+  clientId: workerClientId,
+  clientSecret: workerClientSecret,
+};
+const WORKER_ERROR_MESSAGES: Record<WorkerFormError, string> = {
+  "bad-url": "https:// で始まり、パスのない URL を書いてください。",
+  "missing-token": "Worker を使うにはサービストークンの両方が必要です。",
+};
 
 // The keys as loaded or last saved, and as typed for each provider (kept while another provider is selected).
 let loadedKeys: Keys = {
@@ -43,6 +66,19 @@ const keys: Keys = { ...loadedKeys };
 let choice = resolveChoice(await modelChoiceItem.getValue());
 autoTranslate.checked = await autoTranslateItem.getValue();
 repositories.value = (await privateRepositoriesItem.getValue()).join("\n");
+// The Worker section as loaded or last saved; it is written only when edited here (`planWorkerSave`).
+let loadedWorker = workerForm(storedAccess(await workerAccessItem.getValue()) ?? null);
+function showWorker(values: WorkerForm) {
+  workerUrl.value = values.url;
+  workerClientId.value = values.clientId;
+  workerClientSecret.value = values.clientSecret;
+}
+showWorker(loadedWorker);
+const currentWorker = (): WorkerForm => ({
+  url: workerUrl.value,
+  clientId: workerClientId.value,
+  clientSecret: workerClientSecret.value,
+});
 
 function fillSelect(select: HTMLSelectElement, options: readonly { value: string; label: string }[], value: string) {
   select.replaceChildren(
@@ -99,6 +135,22 @@ const showRepositoriesError = (message: string) => {
   repositories.setAttribute("aria-invalid", String(message !== ""));
 };
 
+const showWorkerError = (message: string, invalid: readonly HTMLInputElement[] = []) => {
+  workerError.textContent = message;
+  for (const input of [workerUrl, workerClientId, workerClientSecret]) {
+    input.setAttribute("aria-invalid", String(invalid.includes(input)));
+  }
+};
+
+// The host permission for the Worker's origin. It must be requested from the user's gesture, before any other await.
+async function requestOrigin(origin: string): Promise<boolean> {
+  try {
+    return await browser.permissions.request({ origins: [originPattern(origin)] });
+  } catch {
+    return false;
+  }
+}
+
 render(choice);
 
 apiKey.addEventListener("input", () => {
@@ -118,6 +170,9 @@ thinking.addEventListener("change", () => {
   showThinkingError("");
 });
 repositories.addEventListener("input", () => showRepositoriesError(""));
+for (const input of [workerUrl, workerClientId, workerClientSecret]) {
+  input.addEventListener("input", () => showWorkerError(""));
+}
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -137,6 +192,20 @@ form.addEventListener("submit", async (event) => {
     return;
   }
   showRepositoriesError("");
+  const worker = planWorkerSave(loadedWorker, currentWorker());
+  if (worker.kind === "invalid") {
+    const inputs = worker.fields.map((name) => workerInputs[name]);
+    showWorkerError(WORKER_ERROR_MESSAGES[worker.code], inputs);
+    inputs[0]?.focus();
+    return;
+  }
+  // The first await of the handler: Chrome asks only inside the click's user gesture.
+  if (worker.kind === "save" && worker.access !== null && !(await requestOrigin(worker.access.origin))) {
+    showWorkerError("この URL への接続が許可されなかったため、保存しませんでした。", [workerUrl]);
+    workerUrl.focus();
+    return;
+  }
+  showWorkerError("");
   const edited = editedKeys(loadedKeys, keys);
   await Promise.all([
     // Only the keys changed here: another options page may have saved the others since this one loaded.
@@ -147,10 +216,21 @@ form.addEventListener("submit", async (event) => {
     modelChoiceItem.setValue(selected.choice),
     autoTranslateItem.setValue(autoTranslate.checked),
     privateRepositoriesItem.setValue(parsed.repositories),
+    worker.kind === "save"
+      ? storeWorker(worker.access, {
+          getStored: () => workerAccessItem.getValue(),
+          setStored: (access) => workerAccessItem.setValue(access),
+          removePermission: (origins) => browser.permissions.remove({ origins }),
+        })
+      : undefined,
   ]);
   Object.assign(keys, edited);
   loadedKeys = { ...keys };
   apiKey.value = keys[choice.provider];
   repositories.value = parsed.repositories.join("\n");
+  if (worker.kind === "save") {
+    loadedWorker = workerForm(worker.access);
+    showWorker(loadedWorker);
+  }
   status.textContent = "保存しました。";
 });
