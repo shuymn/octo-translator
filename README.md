@@ -37,9 +37,25 @@ pnpm run dev                # Chrome with the extension, reloaded on change
 pnpm run build              # .output/chrome-mv3
 pnpm run lint               # oxlint with type-aware rules
 pnpm run fmt                # oxfmt check (pnpm run fmt:fix to apply)
-pnpm run typecheck          # TypeScript
-pnpm run test               # Vitest
+pnpm run typecheck          # TypeScript, the extension's and the Worker's
+pnpm run test               # Vitest, the extension's and then the Worker's
 ```
+
+### Worker
+
+The Worker (stage 2) is a workspace package in `worker/`. It refuses every request without a valid Cloudflare Access
+token (AUTH-1), so it needs the Access team domain and the application's audience tag even locally.
+
+```sh
+cp worker/.dev.vars.example worker/.dev.vars  # fill in the Access settings (git-ignored)
+pnpm --filter octo-translator-worker run dev       # wrangler dev, local only
+pnpm --filter octo-translator-worker run test      # Vitest in the Workers runtime
+pnpm --filter octo-translator-worker run typecheck # checks the generated types are current, then TypeScript
+pnpm --filter octo-translator-worker run types     # regenerate worker-configuration.d.ts after changing wrangler.jsonc
+```
+
+Locally, requests do not pass through Access, so `wrangler dev` answers 401 unless a request carries a token the
+configured team signed.
 
 The GitHub repository settings are declared in `.github/infra.yaml`; review them with `gh infra plan` and apply them
 with `gh infra apply`.

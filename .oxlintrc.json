@@ -8,5 +8,5 @@
   "options": {
     "typeAware": true
   },
-  "ignorePatterns": [".output/**", ".wxt/**"]
+  "ignorePatterns": [".output/**", ".wxt/**", "worker/worker-configuration.d.ts"]
 }

@@ -1,0 +1,3 @@
+# Copy to .dev.vars for `wrangler dev` (git-ignored). Values from the Access application (docs/threat-model.md, AUTH-1).
+ACCESS_TEAM_DOMAIN=https://<team>.cloudflareaccess.com
+ACCESS_AUD=<application audience tag>

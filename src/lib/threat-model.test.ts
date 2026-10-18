@@ -10,16 +10,24 @@ const threatModel =
     "../../docs/threat-model.md"
   ] ?? "";
 
-/** Every test file under `src`, keyed by its path from the repository root. */
+/** Every test file under `src` and `worker/src`, keyed by its path from the repository root. */
 const testFiles = Object.fromEntries(
-  Object.entries(import.meta.glob<string>("../**/*.test.ts", { query: "?raw", import: "default", eager: true })).map(
-    ([path, source]) => [fromRoot(path), source],
-  ),
+  Object.entries(
+    import.meta.glob<string>(["../**/*.test.ts", "../../worker/src/**/*.test.ts"], {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    }),
+  ).map(([path, source]) => [fromRoot(path), source]),
 );
 
-/** A glob key as a path from the repository root: this directory's files come as `./`, the others as `../`. */
+/**
+ * A glob key as a path from the repository root: this directory's files come as `./`, the rest of `src` as `../`, and
+ * the Worker's as `../../worker/`.
+ */
 function fromRoot(path: string): string {
   if (path.startsWith("./")) return `src/lib/${path.slice(2)}`;
+  if (path.startsWith("../../")) return path.slice(6);
   if (path.startsWith("../")) return `src/${path.slice(3)}`;
   throw new Error(`unexpected glob key ${path}`);
 }
@@ -94,7 +102,11 @@ describe("the threat model's citations of tests", () => {
     expect(enforced.flatMap(({ text }) => citedTests(text)).length).toBeGreaterThanOrEqual(10);
     expect(Object.keys(testFiles)).toEqual(
       // A glob leaves out the file that runs it, so this file is not among them.
-      expect.arrayContaining(["src/lib/segments.test.ts", "src/lib/source-analysis.test.ts"]),
+      expect.arrayContaining([
+        "src/lib/segments.test.ts",
+        "src/lib/source-analysis.test.ts",
+        "worker/src/auth.test.ts",
+      ]),
     );
   });
 

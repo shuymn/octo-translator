@@ -27,3 +27,8 @@ npm-debug.log*
 # OS and editor noise
 .DS_Store
 *.tsbuildinfo
+
+# Worker: local secrets and wrangler's local state
+.dev.vars*
+!.dev.vars.example
+.wrangler/

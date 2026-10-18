@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "octo-translator",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-12",
+  "observability": { "enabled": true },
+  // No usage metrics from Wrangler for this project, in CI or locally.
+  "send_metrics": false,
+  // AUTH-1: the Access team domain (`https://<team>.cloudflareaccess.com`) and the Access application's audience tag.
+  // They name the owner's Cloudflare setup, so they are not written in this public repository: set them with
+  // `wrangler secret put` for the deployed Worker and in `.dev.vars` (see `.dev.vars.example`) for `wrangler dev`.
+  "secrets": {
+    "required": ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD"],
+  },
+}
