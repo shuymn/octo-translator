@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import { SEGMENT_KINDS } from "./gemini.ts";
+import { SEGMENT_KINDS } from "./translation.ts";
 
 // Messages from the content script to the background. The background holds the API key and the cache; the content
 // script only sends the text of the page it is on.

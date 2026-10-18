@@ -2,7 +2,8 @@ import * as v from "valibot";
 import { browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import { PageController, type Settings } from "../lib/controller.ts";
-import { TranslationResultSchema, type SourceSegment, type TranslationResult } from "../lib/gemini.ts";
+import { PROVIDER_LABEL } from "../lib/gemini.ts";
+import { TranslationResultSchema, type SourceSegment, type TranslationResult } from "../lib/translation.ts";
 import type { Message } from "../lib/messages.ts";
 import { autoTranslateItem, privateRepositoriesItem } from "../lib/settings.ts";
 
@@ -36,7 +37,13 @@ export default defineContentScript({
   runAt: "document_idle",
   async main(ctx) {
     const controller = new PageController(
-      { doc: document, pathname: () => location.pathname, translate: requestTranslation, openOptions },
+      {
+        doc: document,
+        pathname: () => location.pathname,
+        providerLabel: PROVIDER_LABEL,
+        translate: requestTranslation,
+        openOptions,
+      },
       await readSettings(),
     );
 

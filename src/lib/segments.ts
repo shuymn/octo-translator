@@ -5,7 +5,7 @@
 // `⟦n⟧`, and an element whose text is translated (a link, emphasis) is `⟦n⟧text⟦/n⟧`. The translated nodes are clones
 // of the original elements with only their text replaced, so the model's output is never parsed as HTML.
 
-import type { SegmentKind } from "./gemini.ts";
+import type { SegmentKind } from "./translation.ts";
 
 const MARKER = /⟦(\/?)(\d+)⟧/g;
 const MARKER_CHARACTERS = /[⟦⟧]/;

@@ -1,4 +1,4 @@
-import type { SourceSegment } from "./gemini.ts";
+import type { SourceSegment } from "./translation.ts";
 
 // Translations kept per pull request, so a description is translated once until its text changes.
 

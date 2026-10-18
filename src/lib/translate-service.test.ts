@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { MAX_CACHE_BYTES, store, type Cache } from "./cache.ts";
-import type { SourceSegment, TranslationResult } from "./gemini.ts";
+import type { SourceSegment, TranslationResult } from "./translation.ts";
 import { createTranslateService, type TranslateDeps } from "./translate-service.ts";
 
 const TEXT: SourceSegment[] = [{ kind: "paragraph", text: "text" }];

@@ -71,17 +71,17 @@ translating comments or review threads, and storing translations anywhere the ow
 
 ## Entry points
 
-| Entry point                                         | Reached by | Trusted after                                                 | Status and code                                                   |
-| --------------------------------------------------- | ---------- | ------------------------------------------------------------- | ----------------------------------------------------------------- |
-| The pull request's title and description in the DOM | R1         | never; read as text, sent as data                             | main: `src/lib/pr-page.ts`, `src/lib/segments.ts`                 |
-| Model responses                                     | R2         | schema check, then marker check per segment (DOM-1)           | main: `src/lib/gemini.ts`, `src/lib/segments.ts`                  |
-| Runtime messages to the background                  | R3         | sender is this extension, schema check (MSG-1)                | main: `src/entrypoints/background.ts`, `src/lib/messages.ts`      |
-| Responses from the background to the content script | R3         | schema check                                                  | main: `src/entrypoints/github.content.ts`                         |
-| The options page                                    | owner      | form validation                                               | main: `src/entrypoints/options/`                                  |
-| Worker routes                                       | R4         | Cloudflare Access, then the Access JWT (AUTH-1)               | Planned (2)                                                       |
-| Scheduled GitHub search and pull request bodies     | R1         | never; read as text                                           | Planned (2)                                                       |
-| Agent tools and the wiki                            | R1, R2     | tools are read-only except the wiki writer (WIKI-1, WIKI-2)   | Planned (3)                                                       |
-| Build, CI and dependency updates                    | R6         | lockfile, release age, exact versions, pinned Actions (SUP-1) | main: `package.json`, `pnpm-workspace.yaml`, `.github/workflows/` |
+| Entry point                                         | Reached by | Trusted after                                                 | Status and code                                                            |
+| --------------------------------------------------- | ---------- | ------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| The pull request's title and description in the DOM | R1         | never; read as text, sent as data                             | main: `src/lib/pr-page.ts`, `src/lib/segments.ts`                          |
+| Model responses                                     | R2         | schema check, then marker check per segment (DOM-1)           | main: `src/lib/gemini.ts`, `src/lib/translation.ts`, `src/lib/segments.ts` |
+| Runtime messages to the background                  | R3         | sender is this extension, schema check (MSG-1)                | main: `src/entrypoints/background.ts`, `src/lib/messages.ts`               |
+| Responses from the background to the content script | R3         | schema check                                                  | main: `src/entrypoints/github.content.ts`                                  |
+| The options page                                    | owner      | form validation                                               | main: `src/entrypoints/options/`                                           |
+| Worker routes                                       | R4         | Cloudflare Access, then the Access JWT (AUTH-1)               | Planned (2)                                                                |
+| Scheduled GitHub search and pull request bodies     | R1         | never; read as text                                           | Planned (2)                                                                |
+| Agent tools and the wiki                            | R1, R2     | tools are read-only except the wiki writer (WIKI-1, WIKI-2)   | Planned (3)                                                                |
+| Build, CI and dependency updates                    | R6         | lockfile, release age, exact versions, pinned Actions (SUP-1) | main: `package.json`, `pnpm-workspace.yaml`, `.github/workflows/`          |
 
 ## Invariants
 
@@ -154,9 +154,10 @@ translating comments or review threads, and storing translations anywhere the ow
 ### Resources and cost (RES)
 
 - **RES-1: a request is bounded.** At most 40,000 characters of source text per request, and a 120-second timeout.
-  _Enforced (main):_ `MAX_SOURCE_CHARACTERS` and `TIMEOUT_MS` in `src/lib/gemini.ts`; `src/lib/gemini.test.ts`
-  ("RES-1": too much text is refused before any request). _Pinned by behavior._ _Gap: the timeout is not exercised by
-  a test._
+  _Enforced (main):_ `MAX_SOURCE_CHARACTERS` and `sourceTooLong` in `src/lib/translation.ts`, `TIMEOUT_MS` in
+  `src/lib/gemini.ts`; `src/lib/translation.test.ts` ("RES-1": the limit counts every segment) and
+  `src/lib/gemini.test.ts` ("RES-1": too much text is refused before any request). _Pinned by behavior._ _Gap: the
+  timeout is not exercised by a test._
 - **RES-2: one request per pull request and text version.** Translations are cached by the hash of their segments;
   callers that ask while the same request is in flight share it; the cache keeps at most 5 MB, newest first, and a
   failed cache write still answers the translation. _Enforced (main):_ `createTranslateService` in

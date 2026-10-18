@@ -1,7 +1,8 @@
 import * as v from "valibot";
 import { browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
-import { translateSegments, type TranslationResult } from "../lib/gemini.ts";
+import { translateSegments } from "../lib/gemini.ts";
+import type { TranslationResult } from "../lib/translation.ts";
 import { MessageSchema } from "../lib/messages.ts";
 import { apiKeyItem, cacheItem } from "../lib/settings.ts";
 import { createTranslateService } from "../lib/translate-service.ts";
