@@ -9,7 +9,13 @@ import {
   pullRequestKey,
   repositoryName,
 } from "./pr-page.ts";
-import { buildTranslatedNodes, extractInlineSegment, extractSegments, isJapanese, type Segment } from "./segments.ts";
+import {
+  buildTranslatedNodes,
+  extractInlineSegment,
+  extractPullRequestSegments,
+  toSourceSegments,
+  type Segment,
+} from "./segments.ts";
 
 export type Settings = {
   autoTranslate: boolean;
@@ -55,7 +61,7 @@ type Phase =
   | { kind: "error"; code: TranslationError };
 
 // One translated span of the description: the original nodes stay, and the translated ones take their place.
-type BodyPart = { segment: Segment; translated: ChildNode[] | undefined };
+type BodyPart = { segment: Segment<ChildNode>; translated: ChildNode[] | undefined };
 
 type State = {
   key: string;
@@ -63,7 +69,7 @@ type State = {
   // The title as GitHub rendered it, which identifies the title elements to pair with a translation.
   titleText: string;
   // The title to translate, unless it is already Japanese.
-  titleSegment: Segment | undefined;
+  titleSegment: Segment<ChildNode> | undefined;
   titleTranslation: string | undefined;
   parts: BodyPart[];
   phase: Phase;
@@ -129,11 +135,8 @@ export class PageController {
   }
 
   #createState(key: string, body: HTMLElement, title: HTMLElement | undefined): State {
-    const extracted = title ? extractInlineSegment(title, "title") : undefined;
-    const titleSegment = extracted && !isJapanese(extracted.source) ? extracted : undefined;
-    const parts = extractSegments(body)
-      .filter((segment) => !isJapanese(segment.source))
-      .map((segment) => ({ segment, translated: undefined }));
+    const { title: titleSegment, body: bodySegments } = extractPullRequestSegments(title, body);
+    const parts = bodySegments.map((segment) => ({ segment, translated: undefined }));
     const state: State = {
       key,
       body,
@@ -172,10 +175,7 @@ export class PageController {
     state.phase = { kind: "loading" };
     state.providerLabel = this.#settings.providerLabel;
     this.#render(state);
-    const sources = [
-      ...(state.titleSegment ? [state.titleSegment] : []),
-      ...state.parts.map((part) => part.segment),
-    ].map((segment): SourceSegment => ({ kind: segment.kind, text: segment.source }));
+    const sources = toSourceSegments({ title: state.titleSegment, body: state.parts.map((part) => part.segment) });
     const result = await this.#deps.translate(state.key, sources);
     // The page moved on while the request was in flight.
     if (this.#state !== state) return;

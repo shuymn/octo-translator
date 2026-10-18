@@ -4,8 +4,12 @@
 // elements become numbered markers instead of HTML: an element the model must not touch (code, a mention, an image) is
 // `⟦n⟧`, and an element whose text is translated (a link, emphasis) is `⟦n⟧text⟦/n⟧`. The translated nodes are clones
 // of the original elements with only their text replaced, so the model's output is never parsed as HTML.
+//
+// The extension runs this on the page and the Worker on GitHub's `body_html` (DOM-3), each on its own DOM, so the module
+// names only the parts of a node it uses (`TreeNode`, `TreeElement`) instead of the DOM lib's types, which the Worker
+// does not have, and imports no DOM implementation: the caller passes the root in.
 
-import type { SegmentKind } from "./translation.ts";
+import type { SegmentKind, SourceSegment } from "./translation.ts";
 
 const MARKER = /⟦(\/?)(\d+)⟧/g;
 const MARKER_CHARACTERS = /[⟦⟧]/;
@@ -71,34 +75,54 @@ const KINDS: Record<string, SegmentKind> = {
   TH: "cell",
 };
 
-type Slot = { kind: "keep"; node: ChildNode } | { kind: "wrap"; element: Element };
+// `Node.ELEMENT_NODE` and `Node.TEXT_NODE`, which the DOM standard fixes; the Worker has no global `Node`.
+const ELEMENT_NODE = 1;
+const TEXT_NODE = 3;
 
-export type Segment = {
+// What extraction reads of a node, and what building sets (`textContent` of a cloned element). The page's DOM and the
+// Worker's both have these; `N` is the implementation's node type, so the page gets its own nodes back.
+export type TreeNode = { readonly nodeType: number; textContent: string | null };
+export type TreeElement<N extends TreeNode = TreeNode> = TreeNode & {
+  readonly tagName: string;
+  readonly childNodes: Iterable<N>;
+  readonly childElementCount: number;
+  readonly classList: { contains(token: string): boolean };
+  getAttribute(name: string): string | null;
+};
+// What building the translated nodes needs of the document.
+export type NodeFactory<N extends TreeNode> = {
+  createTextNode(data: string): N;
+  importNode<T extends N>(node: T, deep: boolean): T;
+};
+
+type Slot<N extends TreeNode> = { kind: "keep"; node: N } | { kind: "wrap"; element: N & TreeElement<N> };
+
+export type Segment<N extends TreeNode = TreeNode> = {
   kind: SegmentKind;
   // The nodes the segment replaces, in document order. They stay untouched so the original can be shown again.
-  original: ChildNode[];
+  original: N[];
   // The text sent to the model, with markers for the inline elements.
   source: string;
-  slots: Slot[];
+  slots: Slot<N>[];
   leadingSpace: string;
   trailingSpace: string;
 };
 
-export function extractSegments(root: Element): Segment[] {
-  const segments: Segment[] = [];
+export function extractSegments<N extends TreeNode>(root: TreeElement<N>): Segment<N>[] {
+  const segments: Segment<N>[] = [];
   visitBlock(root, segments);
   return segments;
 }
 
-function visitBlock(block: Element, segments: Segment[]): void {
-  let run: ChildNode[] = [];
+function visitBlock<N extends TreeNode>(block: TreeElement<N>, segments: Segment<N>[]): void {
+  let run: N[] = [];
   const flush = () => {
-    const segment = toSegment(run, KINDS[block.tagName] ?? "paragraph");
+    const segment = toSegment(run, KINDS[tagOf(block)] ?? "paragraph");
     if (segment) segments.push(segment);
     run = [];
   };
   for (const child of block.childNodes) {
-    if (child.nodeType === Node.TEXT_NODE || (isElement(child) && INLINE.has(child.tagName))) {
+    if (child.nodeType === TEXT_NODE || (isElement(child) && INLINE.has(tagOf(child)))) {
       run.push(child);
       continue;
     }
@@ -109,12 +133,15 @@ function visitBlock(block: Element, segments: Segment[]): void {
 }
 
 // The inline content of one element, such as the title, as a single segment.
-export function extractInlineSegment(element: Element, kind: SegmentKind): Segment | undefined {
+export function extractInlineSegment<N extends TreeNode>(
+  element: TreeElement<N>,
+  kind: SegmentKind,
+): Segment<N> | undefined {
   return toSegment([...element.childNodes], kind);
 }
 
-function toSegment(run: ChildNode[], kind: SegmentKind): Segment | undefined {
-  const slots: Slot[] = [];
+function toSegment<N extends TreeNode>(run: N[], kind: SegmentKind): Segment<N> | undefined {
+  const slots: Slot<N>[] = [];
   let source = "";
   let prose = "";
   for (const node of run) {
@@ -145,30 +172,41 @@ function toSegment(run: ChildNode[], kind: SegmentKind): Segment | undefined {
   };
 }
 
-function isKept(element: Element): boolean {
-  if (KEPT_INLINE.has(element.tagName)) return true;
+function isKept(element: TreeElement): boolean {
+  if (KEPT_INLINE.has(tagOf(element))) return true;
   // A link or emphasis around other elements (`<a><code>…</code></a>`) is kept whole.
   if (element.childElementCount > 0) return true;
-  if (element.tagName !== "A") return false;
+  if (tagOf(element) !== "A") return false;
   if (REFERENCE_LINK_CLASSES.some((name) => element.classList.contains(name))) return true;
   // An autolinked URL reads the same in any language.
   return element.textContent?.trim() === element.getAttribute("href");
 }
 
-function isSkippedBlock(element: Element): boolean {
-  return SKIPPED_BLOCKS.has(element.tagName) || SKIPPED_BLOCK_CLASSES.some((name) => element.classList.contains(name));
+function isSkippedBlock(element: TreeElement): boolean {
+  return SKIPPED_BLOCKS.has(tagOf(element)) || SKIPPED_BLOCK_CLASSES.some((name) => element.classList.contains(name));
 }
 
-function isElement(node: Node): node is Element {
-  return node.nodeType === Node.ELEMENT_NODE;
+function isElement<N extends TreeNode>(node: N): node is N & TreeElement<N> {
+  return node.nodeType === ELEMENT_NODE;
+}
+
+// The tag name in upper case. An HTML element's is upper case everywhere, but an `svg` or `math` element's is lower case
+// in a browser (it is not in the HTML namespace) and upper case in the Worker's DOM, and a GitHub alert's title carries
+// an `svg` icon, so the page and the Worker would split it differently (DOM-3).
+function tagOf(element: TreeElement): string {
+  return element.tagName.toUpperCase();
 }
 
 // Builds the nodes for a translation, or answers undefined when the markers do not match the source: every kept slot
 // exactly once, every wrapped slot opened and closed once with only text inside.
-export function buildTranslatedNodes(segment: Segment, translation: string, doc: Document): ChildNode[] | undefined {
+export function buildTranslatedNodes<N extends TreeNode>(
+  segment: Segment<N>,
+  translation: string,
+  doc: NodeFactory<N>,
+): N[] | undefined {
   // No text at all: the segment has prose, and nothing would be left in the page to swap the original back.
   if (translation.replaceAll(MARKER, "").trim() === "") return undefined;
-  const nodes: ChildNode[] = [doc.createTextNode(segment.leadingSpace)];
+  const nodes: N[] = [doc.createTextNode(segment.leadingSpace)];
   const used = new Set<number>();
   let open: number | undefined;
   let last = 0;
@@ -200,10 +238,34 @@ export function buildTranslatedNodes(segment: Segment, translation: string, doc:
   }
   if (open !== undefined || used.size !== segment.slots.length) return undefined;
   nodes.push(doc.createTextNode(translation.slice(last)), doc.createTextNode(segment.trailingSpace));
-  return nodes.filter((node) => node.nodeType !== Node.TEXT_NODE || node.textContent !== "");
+  return nodes.filter((node) => node.nodeType !== TEXT_NODE || node.textContent !== "");
 }
 
 // Hiragana or katakana: the text is already Japanese, so it is not sent.
 export function isJapanese(text: string): boolean {
   return /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text);
+}
+
+// The segments of a pull request as the extension sends them: the title's, then the description's, leaving out any that
+// is already Japanese. The page controller and the Worker's ahead-of-time translation both take them from here, so the
+// Worker stores a translation under the hash of the same segments the page asks with (DOM-3).
+export type PullRequestSegments<N extends TreeNode> = { title: Segment<N> | undefined; body: Segment<N>[] };
+
+export function extractPullRequestSegments<N extends TreeNode>(
+  title: TreeElement<N> | undefined,
+  body: TreeElement<N>,
+): PullRequestSegments<N> {
+  const titleSegment = title ? extractInlineSegment(title, "title") : undefined;
+  return {
+    title: titleSegment && !isJapanese(titleSegment.source) ? titleSegment : undefined,
+    body: extractSegments(body).filter((segment) => !isJapanese(segment.source)),
+  };
+}
+
+// The segments as they travel to the background, the Worker and the model, in the order the translations come back.
+export function toSourceSegments(segments: PullRequestSegments<TreeNode>): SourceSegment[] {
+  return [...(segments.title ? [segments.title] : []), ...segments.body].map((segment): SourceSegment => ({
+    kind: segment.kind,
+    text: segment.source,
+  }));
 }

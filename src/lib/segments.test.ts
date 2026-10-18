@@ -1,5 +1,14 @@
 import { describe, expect, test } from "vitest";
-import { buildTranslatedNodes, extractInlineSegment, extractSegments, isJapanese } from "./segments.ts";
+import { hashSegments } from "./cache.ts";
+import { EMOJI_TITLE, PULL_REQUEST_SHAPES } from "./pr-shapes.fixtures.ts";
+import {
+  buildTranslatedNodes,
+  extractInlineSegment,
+  extractPullRequestSegments,
+  extractSegments,
+  isJapanese,
+  toSourceSegments,
+} from "./segments.ts";
 
 function render(html: string): HTMLElement {
   const root = document.createElement("div");
@@ -118,4 +127,26 @@ test.each([
   ["Fix a bug", false],
 ])("isJapanese(%s) is %s", (text, expected) => {
   expect(isJapanese(text)).toBe(expected);
+});
+
+// DOM-3: the page side of the parity with the Worker. `worker/src/pr-segments.test.ts` reads the API side of the same
+// fixtures on the Worker's DOM in workerd and expects the same segments and hashes.
+describe("DOM-3: segments of a pull request as the page shows it", () => {
+  test.each(PULL_REQUEST_SHAPES.map((shape) => [shape.name, shape] as const))("%s", async (_, shape) => {
+    const segments = toSourceSegments(extractPullRequestSegments(render(shape.pageTitle), render(shape.page)));
+    expect(segments).toEqual(shape.segments);
+    expect(await hashSegments(segments)).toBe(shape.hash);
+  });
+
+  test("an svg's lower-case tag name in the page counts as the inline element it is", () => {
+    const root = render('<p><svg viewBox="0 0 1 1"></svg>Note</p>');
+    expect(root.querySelector("svg")?.tagName).toBe("svg");
+    expect(extractSegments(root).map((segment) => segment.source)).toEqual(["⟦0⟧Note"]);
+  });
+
+  // The Worker reads the API's `:sparkles:` instead (worker/src/pr-segments.test.ts), so the hashes differ and the page
+  // translates on request.
+  test("a title with an emoji shows the emoji, not the API's shortcode", () => {
+    expect(extractInlineSegment(render(EMOJI_TITLE.pageTitle), "title")?.source).toBe("✨ Add the cache");
+  });
 });
