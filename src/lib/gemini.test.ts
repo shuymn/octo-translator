@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { buildRequestBody, MODEL, parseInteraction, translateSegments } from "./gemini.ts";
+import { buildRequestBody, parseInteraction, translateSegments, type GeminiOptions } from "./gemini.ts";
 import { MAX_SOURCE_CHARACTERS } from "./translation.ts";
 
 function interaction(text: string, status = "completed"): unknown {
@@ -13,16 +13,19 @@ function interaction(text: string, status = "completed"): unknown {
   };
 }
 
+const OPTIONS: GeminiOptions = { model: "gemini-3.8-flash", thinking: "high" };
+
 function respond(status: number, body: unknown): typeof fetch {
   return vi.fn<typeof fetch>(async () => Response.json(body, { status }));
 }
 
 describe("buildRequestBody", () => {
   test("PRIV-3: asks for JSON translations and no stored interaction", () => {
-    expect(buildRequestBody([{ kind: "paragraph", text: "a" }])).toMatchObject({
-      model: MODEL,
+    expect(buildRequestBody([{ kind: "paragraph", text: "a" }], OPTIONS)).toMatchObject({
+      model: "gemini-3.8-flash",
       input: JSON.stringify({ segments: [{ kind: "paragraph", text: "a" }] }),
       response_format: { mime_type: "application/json" },
+      generation_config: { thinking_level: "high" },
       store: false,
     });
   });
@@ -38,6 +41,7 @@ describe("translateSegments", () => {
           { kind: "paragraph", text: "Body" },
         ],
         "key",
+        OPTIONS,
         fetchFn,
       ),
     ).resolves.toEqual({
@@ -51,12 +55,12 @@ describe("translateSegments", () => {
 
   test("RES-1: does not call the API without a key or with too much text", async () => {
     const fetchFn = respond(200, {});
-    await expect(translateSegments([{ kind: "paragraph", text: "a" }], "", fetchFn)).resolves.toEqual({
+    await expect(translateSegments([{ kind: "paragraph", text: "a" }], "", OPTIONS, fetchFn)).resolves.toEqual({
       ok: false,
       code: "no-api-key",
     });
     await expect(
-      translateSegments([{ kind: "paragraph", text: "a".repeat(MAX_SOURCE_CHARACTERS + 1) }], "key", fetchFn),
+      translateSegments([{ kind: "paragraph", text: "a".repeat(MAX_SOURCE_CHARACTERS + 1) }], "key", OPTIONS, fetchFn),
     ).resolves.toEqual({
       ok: false,
       code: "too-long",
@@ -74,7 +78,9 @@ describe("translateSegments", () => {
     ],
     [429, "rate-limited", { error: {} }],
   ])("maps HTTP %i to %s", async (status, code, body) => {
-    await expect(translateSegments([{ kind: "paragraph", text: "a" }], "key", respond(status, body))).resolves.toEqual({
+    await expect(
+      translateSegments([{ kind: "paragraph", text: "a" }], "key", OPTIONS, respond(status, body)),
+    ).resolves.toEqual({
       ok: false,
       code,
     });
@@ -84,7 +90,7 @@ describe("translateSegments", () => {
     const fetchFn = vi.fn<typeof fetch>(async () => {
       throw new TypeError("Failed to fetch");
     });
-    await expect(translateSegments([{ kind: "paragraph", text: "a" }], "key", fetchFn)).resolves.toEqual({
+    await expect(translateSegments([{ kind: "paragraph", text: "a" }], "key", OPTIONS, fetchFn)).resolves.toEqual({
       ok: false,
       code: "network",
     });

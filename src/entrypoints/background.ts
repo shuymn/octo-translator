@@ -1,18 +1,21 @@
 import * as v from "valibot";
 import { browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
-import { translateSegments } from "../lib/gemini.ts";
-import type { TranslationResult } from "../lib/translation.ts";
+import { translateWith } from "../lib/clients.ts";
 import { MessageSchema } from "../lib/messages.ts";
-import { apiKeyItem, cacheItem } from "../lib/settings.ts";
+import { resolveChoice } from "../lib/providers.ts";
+import { apiKeyItems } from "../lib/api-keys.ts";
+import { cacheItem, modelChoiceItem } from "../lib/settings.ts";
 import { createTranslateService } from "../lib/translate-service.ts";
+import type { TranslationResult } from "../lib/translation.ts";
 
 export default defineBackground(() => {
   const translate = createTranslateService({
-    getApiKey: () => apiKeyItem.getValue(),
+    getChoice: async () => resolveChoice(await modelChoiceItem.getValue()),
+    getApiKey: (provider) => apiKeyItems[provider].getValue(),
     getCache: () => cacheItem.getValue(),
     setCache: (cache) => cacheItem.setValue(cache),
-    translate: (segments, apiKey) => translateSegments(segments, apiKey),
+    translate: (segments, choice, apiKey) => translateWith(choice, segments, apiKey),
     now: () => Date.now(),
   });
 

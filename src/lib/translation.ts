@@ -26,7 +26,7 @@ export const TranslationResultSchema = v.variant("ok", [
 export type TranslationResult = v.InferOutput<typeof TranslationResultSchema>;
 
 // Characters of source text in one request. A description longer than this is not sent, so a single page cannot use
-// up the free tier's tokens.
+// up the owner's tokens or a free tier.
 export const MAX_SOURCE_CHARACTERS = 40_000;
 
 // Short on purpose: it is sent with every request. The style rules follow the PR and technical-writing guides of

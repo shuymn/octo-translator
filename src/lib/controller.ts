@@ -14,13 +14,13 @@ import { buildTranslatedNodes, extractInlineSegment, extractSegments, isJapanese
 export type Settings = {
   autoTranslate: boolean;
   privateRepositories: string[];
+  // The chosen provider's name as the page shows it, such as "DeepSeek".
+  providerLabel: string;
 };
 
 export type ControllerDeps = {
   doc: Document;
   pathname: () => string;
-  // The provider's name as the page shows it, such as "Gemini".
-  providerLabel: string;
   translate: (key: string, segments: SourceSegment[]) => Promise<TranslationResult>;
   openOptions: () => void;
 };
@@ -28,7 +28,7 @@ export type ControllerDeps = {
 const ERROR_MESSAGES: Record<TranslationError, (provider: string) => string> = {
   "no-api-key": (provider) => `${provider} の API キーが設定されていません。`,
   "api-key-rejected": () => "API キーが受け付けられませんでした。",
-  "rate-limited": () => "無料枠の上限に達しました。しばらくしてからもう一度試してください。",
+  "rate-limited": (provider) => `${provider} API の利用上限に達しました。しばらくしてからもう一度試してください。`,
   "too-long": () => "本文が長すぎるため翻訳しません。",
   network: (provider) => `${provider} API に接続できませんでした。`,
   "api-error": (provider) => `${provider} API がエラーを返しました。`,
@@ -58,6 +58,8 @@ type State = {
   titleTranslation: string | undefined;
   parts: BodyPart[];
   phase: Phase;
+  // The provider of the last request, so its notes keep naming it after the settings change.
+  providerLabel: string;
   showTranslation: boolean;
   controls: Controls;
 };
@@ -131,8 +133,9 @@ export class PageController {
       titleTranslation: undefined,
       parts,
       phase: titleSegment === undefined && parts.length === 0 ? { kind: "none" } : { kind: "idle" },
+      providerLabel: this.#settings.providerLabel,
       showTranslation: false,
-      controls: new Controls(this.#deps.doc, this.#deps.providerLabel, {
+      controls: new Controls(this.#deps.doc, {
         onToggle: () => this.#onToggle(state),
         onOpenSettings: () => this.#deps.openOptions(),
       }),
@@ -158,6 +161,7 @@ export class PageController {
     // say) but before the next sync noticed.
     if (!this.#stillAllowed(state)) return;
     state.phase = { kind: "loading" };
+    state.providerLabel = this.#settings.providerLabel;
     this.#render(state);
     const sources = [
       ...(state.titleSegment ? [state.titleSegment] : []),
@@ -229,17 +233,18 @@ export class PageController {
 
   #view(state: State): ControlsView {
     const { phase } = state;
-    if (phase.kind === "loading") return { kind: "loading" };
+    if (phase.kind === "loading") return { kind: "loading", provider: state.providerLabel };
     if (phase.kind === "error") {
       return {
         kind: "error",
-        message: ERROR_MESSAGES[phase.code](this.#deps.providerLabel),
+        message: ERROR_MESSAGES[phase.code](state.providerLabel),
         offerSettings: SETTINGS_ERRORS.has(phase.code),
       };
     }
     if (phase.kind === "translated") {
       return {
         kind: "translated",
+        provider: state.providerLabel,
         showTranslation: state.showTranslation,
         partial:
           (state.titleSegment !== undefined && state.titleTranslation === undefined) ||

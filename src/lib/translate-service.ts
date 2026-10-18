@@ -1,11 +1,13 @@
 import { hashSegments, lookup, store, type Cache } from "./cache.ts";
+import { choiceKey, type ModelChoice, type Provider } from "./providers.ts";
 import type { SourceSegment, TranslationResult } from "./translation.ts";
 
 export type TranslateDeps = {
-  getApiKey: () => Promise<string>;
+  getChoice: () => Promise<ModelChoice>;
+  getApiKey: (provider: Provider) => Promise<string>;
   getCache: () => Promise<Cache>;
   setCache: (cache: Cache) => Promise<void>;
-  translate: (segments: SourceSegment[], apiKey: string) => Promise<TranslationResult>;
+  translate: (segments: SourceSegment[], choice: ModelChoice, apiKey: string) => Promise<TranslationResult>;
   now: () => number;
 };
 
@@ -17,13 +19,15 @@ export type TranslateService = (key: string, segments: SourceSegment[]) => Promi
 export function createTranslateService(deps: TranslateDeps): TranslateService {
   const inFlight = new Map<string, Promise<TranslationResult>>();
   return async (key, segments) => {
+    const choice = await deps.getChoice();
+    const model = choiceKey(choice);
     const hash = await hashSegments(segments);
-    const cached = lookup(await deps.getCache(), key, hash);
+    const cached = lookup(await deps.getCache(), key, hash, model);
     if (cached) return { ok: true, translations: cached };
-    const id = `${key}\n${hash}`;
+    const id = `${key}\n${hash}\n${model}`;
     let pending = inFlight.get(id);
     if (!pending) {
-      pending = translateAndStore(key, hash, segments, deps).finally(() => inFlight.delete(id));
+      pending = translateAndStore(key, hash, model, segments, choice, deps).finally(() => inFlight.delete(id));
       inFlight.set(id, pending);
     }
     return pending;
@@ -33,15 +37,17 @@ export function createTranslateService(deps: TranslateDeps): TranslateService {
 async function translateAndStore(
   key: string,
   hash: string,
+  model: string,
   segments: SourceSegment[],
+  choice: ModelChoice,
   deps: TranslateDeps,
 ): Promise<TranslationResult> {
-  const result = await deps.translate(segments, await deps.getApiKey());
+  const result = await deps.translate(segments, choice, await deps.getApiKey(choice.provider));
   if (!result.ok) return result;
   try {
     // Read again: another tab may have stored an entry while the request was in flight.
     await deps.setCache(
-      store(await deps.getCache(), key, { hash, translations: result.translations, savedAt: deps.now() }),
+      store(await deps.getCache(), key, { hash, model, translations: result.translations, savedAt: deps.now() }),
     );
   } catch {
     // The cache only saves requests; the translation is still good.
