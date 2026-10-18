@@ -5,22 +5,32 @@
  */
 import { describe, expect, test } from "vitest";
 
-/** Every non-test script under `src`, in any module format Vite bundles, keyed by its path from the repository root. */
+/**
+ * Every non-test script under `src` and `worker/src`, in any module format Vite bundles, keyed by its path from the
+ * repository root.
+ */
 const sources = Object.fromEntries(
   Object.entries(
-    import.meta.glob<string>("../**/*.{ts,mts,cts,tsx,js,mjs,cjs,jsx}", {
-      query: "?raw",
-      import: "default",
-      eager: true,
-    }),
+    import.meta.glob<string>(
+      ["../**/*.{ts,mts,cts,tsx,js,mjs,cjs,jsx}", "../../worker/src/**/*.{ts,mts,cts,tsx,js,mjs,cjs,jsx}"],
+      {
+        query: "?raw",
+        import: "default",
+        eager: true,
+      },
+    ),
   )
     .map(([path, source]) => [fromRoot(path), source] as const)
     .filter(([path]) => !/\.test\.[cm]?[jt]sx?$/.test(path)),
 );
 
-/** A glob key as a path from the repository root: this directory's files come as `./`, the others as `../`. */
+/**
+ * A glob key as a path from the repository root: this directory's files come as `./`, the rest of `src` as `../`, and
+ * the Worker's as `../../worker/`.
+ */
 function fromRoot(path: string): string {
   if (path.startsWith("./")) return `src/lib/${path.slice(2)}`;
+  if (path.startsWith("../../")) return path.slice(6);
   if (path.startsWith("../")) return `src/${path.slice(3)}`;
   throw new Error(`unexpected glob key ${path}`);
 }
@@ -33,13 +43,24 @@ function code(source: string): string {
   return source.replaceAll(/^\s*\/\*[\s\S]*?\*\//gm, "").replaceAll(/^\s*\/\/.*$/gm, "");
 }
 
-type Rule = { readonly name: string; readonly pattern: RegExp; readonly allowed: readonly string[] };
+type Rule = {
+  readonly name: string;
+  readonly pattern: RegExp;
+  /** The directories the rule holds in. */
+  readonly under: readonly string[];
+  readonly allowed: readonly string[];
+};
+
+const EXTENSION = ["src/"];
+const WORKER = ["worker/src/"];
 
 // DOM-1: no API that parses a string as HTML.
 const HTML_SINKS: Rule = {
   name: "an HTML sink",
   pattern:
     /\b(?:innerHTML|outerHTML|insertAdjacentHTML|DOMParser|createContextualFragment|setHTMLUnsafe|parseHTMLUnsafe)\b|\bdocument\.write(?:ln)?\b/,
+  // The Worker runs `src/lib` too, and will walk `body_html` with a DOM (DOM-3).
+  under: [...EXTENSION, ...WORKER],
   allowed: [],
 };
 
@@ -47,6 +68,7 @@ const HTML_SINKS: Rule = {
 const SYNC_STORAGE: Rule = {
   name: "storage.sync",
   pattern: /\bstorage\.sync\b|["'`]sync:/,
+  under: EXTENSION,
   allowed: [],
 };
 
@@ -54,6 +76,7 @@ const SYNC_STORAGE: Rule = {
 const API_KEY_ITEM: Rule = {
   name: "the API key items",
   pattern: /\bapiKeyItems?\b/,
+  under: EXTENSION,
   allowed: ["src/lib/api-keys.ts", "src/entrypoints/background.ts", "src/entrypoints/options/main.ts"],
 };
 
@@ -62,6 +85,7 @@ const API_KEY_ITEM: Rule = {
 const API_KEY_MODULE: Rule = {
   name: "the API key module",
   pattern: /["'`](?:\.{1,2}\/)+(?:[\w-]+\/)*api-keys(?:\.[cm]?[jt]s)?["'`]/,
+  under: EXTENSION,
   allowed: ["src/entrypoints/background.ts", "src/entrypoints/options/main.ts"],
 };
 
@@ -70,15 +94,55 @@ const API_KEY_MODULE: Rule = {
 const API_KEY_NAME: Rule = {
   name: "an API key's storage name",
   pattern: /["'`](?:local:)?\w*apikey["'`]/i,
+  under: EXTENSION,
   allowed: ["src/lib/api-keys.ts"],
 };
 
-const RULES = [HTML_SINKS, SYNC_STORAGE, API_KEY_ITEM, API_KEY_MODULE, API_KEY_NAME];
+// RES-3: a statement is prepared only from a constant, so its values can only be bound.
+const PREPARED_FROM_CONSTANT: Rule = {
+  name: "a statement prepared from anything but a constant",
+  pattern: /\.prepare\((?!\s*[A-Z][A-Z0-9_]*\s*,?\s*\))/,
+  under: WORKER,
+  allowed: [],
+};
+
+// RES-3: no SQL built with a template's `${}` or with `+` and a value.
+const BUILT_SQL: Rule = {
+  name: "SQL built from strings",
+  pattern:
+    /`(?=[^`]*\$\{)(?=[^`]*\b(?:select|insert|update|delete|replace|create|drop|alter|pragma|from|where|values)\s)[^`]*`|"[^"\n]*\b(?:select|insert|update|delete|replace|from|where|values|set)\b[^"\n]*"\s*\+(?!\s*["'`])|'[^'\n]*\b(?:select|insert|update|delete|replace|from|where|values|set)\b[^'\n]*'\s*\+(?!\s*["'`])/i,
+  under: WORKER,
+  allowed: [],
+};
+
+// RES-3: D1's `exec` runs SQL without bound values.
+const UNBOUND_EXEC: Rule = {
+  name: "D1 exec",
+  pattern: /\b(?:db|DB|database)\s*\.\s*exec\(|\.exec\(\s*["'`]/,
+  under: WORKER,
+  allowed: [],
+};
+
+const RULES = [
+  HTML_SINKS,
+  SYNC_STORAGE,
+  API_KEY_ITEM,
+  API_KEY_MODULE,
+  API_KEY_NAME,
+  PREPARED_FROM_CONSTANT,
+  BUILT_SQL,
+  UNBOUND_EXEC,
+];
 
 /** The files that break a rule. */
 function violations(rule: Rule, files: Readonly<Record<string, string>>): string[] {
   return Object.entries(files)
-    .filter(([path, source]) => !rule.allowed.includes(path) && rule.pattern.test(code(source)))
+    .filter(
+      ([path, source]) =>
+        rule.under.some((directory) => path.startsWith(directory)) &&
+        !rule.allowed.includes(path) &&
+        rule.pattern.test(code(source)),
+    )
     .map(([path]) => path);
 }
 
@@ -90,12 +154,14 @@ describe("source analysis", () => {
         "src/lib/segments.ts",
         "src/entrypoints/background.ts",
         "src/entrypoints/options/main.ts",
+        "worker/src/translations-db.ts",
+        "worker/src/translate.ts",
       ]),
     );
   });
 
   test.each(RULES.map((rule) => [rule.name, rule] as const))(
-    "no file breaks the rule on %s (DOM-1, KEY-1)",
+    "no file breaks the rule on %s (DOM-1, KEY-1, RES-3)",
     (_, rule) => {
       expect(violations(rule, sources)).toEqual([]);
     },
@@ -113,7 +179,12 @@ describe("source analysis", () => {
       "document.write(text);",
       "document.writeln(text);",
     ];
-    for (const fixture of fixtures) expect(violations(HTML_SINKS, { "src/x.ts": fixture })).toEqual(["src/x.ts"]);
+    for (const fixture of fixtures) {
+      expect(violations(HTML_SINKS, { "src/x.ts": fixture, "worker/src/x.ts": fixture })).toEqual([
+        "src/x.ts",
+        "worker/src/x.ts",
+      ]);
+    }
     expect(violations(HTML_SINKS, { "src/x.ts": "// innerHTML is never used\nel.textContent = text;" })).toEqual([]);
     // A `/*` inside a string does not open a comment that hides the sink after it.
     const glob = 'const matches = ["https://github.com/*"];\nel.innerHTML = text;\n/* Update the status. */';
@@ -158,6 +229,49 @@ describe("source analysis", () => {
         "src/lib/providers.ts": 'const url = "https://platform.openai.com/api-keys";',
       }),
     ).toEqual(["src/entrypoints/github.content.ts", "src/lib/settings.ts", "src/lib/controller.ts"]);
+  });
+
+  test("RES-3: catches SQL built from strings, statements prepared from anything but a constant, and exec", () => {
+    const built = [
+      "const sql = `SELECT * FROM translations WHERE pr_key = '${key}'`;",
+      "db.prepare(`DELETE FROM translations WHERE pr_key = ${key}`);",
+      'const sql = "SELECT * FROM translations WHERE pr_key = \'" + key + "\'";',
+      'const sql = "SELECT translations FROM translations " +\n  "WHERE pr_key = " + key;',
+      "const sql = 'update translations set translations = ' + value;",
+    ];
+    for (const fixture of built)
+      expect(violations(BUILT_SQL, { "worker/src/x.ts": fixture })).toEqual(["worker/src/x.ts"]);
+    const literal = [
+      'const SELECT = "SELECT translations FROM translations WHERE pr_key = ?";',
+      'const UPSERT =\n  "INSERT INTO translations (a, b) VALUES (?, ?) " +\n  "ON CONFLICT (a) DO UPDATE SET b = excluded.b";',
+      "console.error(`translations ${operation} failed`);",
+    ];
+    for (const fixture of literal) expect(violations(BUILT_SQL, { "worker/src/x.ts": fixture })).toEqual([]);
+
+    const prepared = [
+      "db.prepare(sql);",
+      "db.prepare(`SELECT 1`);",
+      'db.prepare("SELECT " + column);',
+      "db.prepare(QUERIES[name]);",
+    ];
+    for (const fixture of prepared) {
+      expect(violations(PREPARED_FROM_CONSTANT, { "worker/src/x.ts": fixture })).toEqual(["worker/src/x.ts"]);
+    }
+    expect(
+      violations(PREPARED_FROM_CONSTANT, {
+        "worker/src/a.ts": "db.prepare(SELECT_TRANSLATIONS).bind(key);",
+        "worker/src/b.ts": "db.prepare( SELECT_TRANSLATIONS ).bind(key);",
+        "worker/src/c.ts": "db\n  .prepare(\n    SELECT_TRANSLATIONS,\n  )\n  .bind(key);",
+      }),
+    ).toEqual([]);
+
+    for (const fixture of ["await db.exec(sql);", 'await env.DB.exec("DELETE FROM translations");']) {
+      expect(violations(UNBOUND_EXEC, { "worker/src/x.ts": fixture })).toEqual(["worker/src/x.ts"]);
+    }
+    expect(violations(UNBOUND_EXEC, { "worker/src/x.ts": "const match = /^\\d+$/.exec(value);" })).toEqual([]);
+
+    // The Worker's rules hold in the Worker, not in the extension.
+    expect(violations(PREPARED_FROM_CONSTANT, { "src/x.ts": "db.prepare(sql);" })).toEqual([]);
   });
 
   // The handler's checks are pinned by behavior in message-handler.test.ts; this pins the wiring no test runs.

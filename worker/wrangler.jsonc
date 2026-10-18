@@ -9,6 +9,16 @@
   // AUTH-1: the Access team domain (`https://<team>.cloudflareaccess.com`) and the Access application's audience tag.
   // They name the owner's Cloudflare setup, so they are not written in this public repository: set them with
   // `wrangler secret put` for the deployed Worker and in `.dev.vars` (see `.dev.vars.example`) for `wrangler dev`.
+  // RES-2, RES-3: the stored translations. No database ID is committed: `wrangler deploy` provisions the database and
+  // writes its ID here (https://developers.cloudflare.com/workers/wrangler/configuration/#automatic-provisioning); keep
+  // that change out of commits. Local development and the tests use a local database.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "octo-translator",
+      "migrations_dir": "migrations",
+    },
+  ],
   "secrets": {
     "required": ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD"],
   },

@@ -6,6 +6,8 @@ import * as v from "valibot";
 // What a segment is in the page, so the model can keep a heading or a list item short.
 export const SEGMENT_KINDS = ["title", "heading", "item", "cell", "paragraph"] as const;
 export type SegmentKind = (typeof SEGMENT_KINDS)[number];
+// A segment as it travels between the content script, the background and the Worker; each side parses it with this.
+export const SourceSegmentSchema = v.object({ kind: v.picklist(SEGMENT_KINDS), text: v.string() });
 export type SourceSegment = { kind: SegmentKind; text: string };
 
 export const TRANSLATION_ERRORS = [

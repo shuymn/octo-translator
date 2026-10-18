@@ -55,12 +55,13 @@ translating comments or review threads, and storing translations anywhere the ow
 | ID  | Asset                                                                    | Why it matters                                                                                           |
 | --- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
 | A1  | The integrity of the github.com page the owner is signed in to           | Script or markup injected there acts with the owner's GitHub session                                     |
-| A2  | Model provider API keys (Gemini, DeepSeek, OpenAI)                       | A leaked key spends the owner's money until revoked                                                      |
+| A2  | Model provider API keys (Gemini, DeepSeek, OpenAI)                       | A leaked key spends the owner's money; in the extension's storage and, from stage 2, as Worker secrets   |
 | A3  | The GitHub token (stage 2 on)                                            | It reads the owner's private repositories                                                                |
 | A4  | Text of private repositories and pull requests                           | Sending it to a provider discloses it to that provider, and the free tiers may train on it               |
 | A5  | The repository wiki, above all its glossary (stage 3)                    | Every later translation of the repository uses it; a planted entry misleads translations for a long time |
 | A6  | Cost: model tokens, Cloudflare requests, Durable Object time and storage | The owner pays                                                                                           |
 | A7  | The Worker's Access settings: team domain and application audience tag   | Not credentials, but they identify the owner's Cloudflare setup; Worker secrets, never in the repository |
+| A8  | The Worker's D1 database: pull request keys and their translations       | Private repositories' names and translated text; read only through the Worker, behind AUTH-1             |
 
 ## Adversaries
 
@@ -75,17 +76,19 @@ translating comments or review threads, and storing translations anywhere the ow
 
 ## Entry points
 
-| Entry point                                         | Reached by | Trusted after                                                 | Status and code                                                                                    |
-| --------------------------------------------------- | ---------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| The pull request's title and description in the DOM | R1         | never; read as text, sent as data                             | main: `src/lib/pr-page.ts`, `src/lib/segments.ts`                                                  |
-| Model responses                                     | R2         | schema check, then marker check per segment (DOM-1)           | main: `src/lib/responses.ts`, `src/lib/gemini.ts`, `src/lib/translation.ts`, `src/lib/segments.ts` |
-| Runtime messages to the background                  | R3         | sender is this extension, schema check (MSG-1)                | main: `src/entrypoints/background.ts`, `src/lib/messages.ts`                                       |
-| Responses from the background to the content script | R3         | schema check                                                  | main: `src/entrypoints/github.content.ts`                                                          |
-| The options page                                    | owner      | form validation; the provider choice by `parseChoice`         | main: `src/entrypoints/options/`, `src/lib/providers.ts`                                           |
-| Worker routes (`GET /v1/ping` so far)               | R4         | Cloudflare Access, then the Access JWT (AUTH-1)               | main: `worker/src/handler.ts`, `worker/src/auth.ts`                                                |
-| Scheduled GitHub search and pull request bodies     | R1         | never; read as text                                           | Planned (2)                                                                                        |
-| Agent tools and the wiki                            | R1, R2     | tools are read-only except the wiki writer (WIKI-1, WIKI-2)   | Planned (3)                                                                                        |
-| Build, CI and dependency updates                    | R6         | lockfile, release age, exact versions, pinned Actions (SUP-1) | main: `package.json`, `worker/package.json`, `pnpm-workspace.yaml`, `.github/workflows/`           |
+| Entry point                                          | Reached by | Trusted after                                                 | Status and code                                                                                    |
+| ---------------------------------------------------- | ---------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| The pull request's title and description in the DOM  | R1         | never; read as text, sent as data                             | main: `src/lib/pr-page.ts`, `src/lib/segments.ts`                                                  |
+| Model responses                                      | R2         | schema check, then marker check per segment (DOM-1)           | main: `src/lib/responses.ts`, `src/lib/gemini.ts`, `src/lib/translation.ts`, `src/lib/segments.ts` |
+| Runtime messages to the background                   | R3         | sender is this extension, schema check (MSG-1)                | main: `src/entrypoints/background.ts`, `src/lib/messages.ts`                                       |
+| Responses from the background to the content script  | R3         | schema check                                                  | main: `src/entrypoints/github.content.ts`                                                          |
+| The options page                                     | owner      | form validation; the provider choice by `parseChoice`         | main: `src/entrypoints/options/`, `src/lib/providers.ts`                                           |
+| Worker routes (`GET /v1/ping`, `POST /v1/translate`) | R4         | Cloudflare Access, then the Access JWT (AUTH-1)               | main: `worker/src/handler.ts`, `worker/src/auth.ts`                                                |
+| The translate route's body                           | owner      | AUTH-1, then a byte limit and a schema check (RES-1)          | main: `worker/src/body.ts`, `worker/src/translate.ts`                                              |
+| Rows read back from D1                               | the Worker | schema check; a row that does not fit is a miss               | main: `worker/src/translations-db.ts`                                                              |
+| Scheduled GitHub search and pull request bodies      | R1         | never; read as text                                           | Planned (2)                                                                                        |
+| Agent tools and the wiki                             | R1, R2     | tools are read-only except the wiki writer (WIKI-1, WIKI-2)   | Planned (3)                                                                                        |
+| Build, CI and dependency updates                     | R6         | lockfile, release age, exact versions, pinned Actions (SUP-1) | main: `package.json`, `worker/package.json`, `pnpm-workspace.yaml`, `.github/workflows/`           |
 
 ## Invariants
 
@@ -131,6 +134,12 @@ translating comments or review threads, and storing translations anywhere the ow
   in `src/lib/responses.ts`, `translateWith` in `src/lib/clients.ts`, `host_permissions` in `wxt.config.ts`;
   `src/lib/gemini.test.ts` and `src/lib/responses.test.ts` ("KEY-2": the URL has no key, the header has it) and
   `src/lib/clients.test.ts` ("KEY-2": each provider's request goes to that provider's endpoint). _Pinned by behavior._
+  The Worker uses the same clients: its keys are Worker secrets, one per provider (`DEEPSEEK_API_KEY`,
+  `OPENAI_API_KEY`, `GEMINI_API_KEY`, none in the repository), passed only to `translateWith`, and never part of an
+  answer or a log line. _Enforced (main):_ `API_KEY_SECRETS` and `handleTranslate` in `worker/src/translate.ts`, wired
+  to `translateWith` in `worker/src/index.ts`; `worker/src/translate.test.ts` ("KEY-2": the request to DeepSeek carries
+  the Worker's key in its header only and the answer does not; a failed store logs only the error's name). _Pinned by
+  behavior._
 - **KEY-3: from stage 2, provider keys and the GitHub token live only on Cloudflare.** They are Worker secrets or AI
   Gateway provider keys; the extension holds only the Access service token, and the agent receives neither keys nor
   the token, only tools that use them. _Planned (2)_ for the Worker, _Planned (3)_ for the agent.
@@ -155,8 +164,10 @@ translating comments or review threads, and storing translations anywhere the ow
   entry in the options. The check is repeated right before a request is sent, so a click that lands after GitHub moved
   to another pull request sends nothing. _Enforced (main):_ `#allowed` and `#stillAllowed` in `src/lib/controller.ts`,
   `isPublicRepository` in `src/lib/pr-page.ts`; `src/lib/controller.test.ts` ("PRIV-1": a private repository with and
-  without the listing, and a navigation before the next sync). _Pinned by behavior._ The Worker applies the same list
-  before translating or storing: _Planned (2)._
+  without the listing, and a navigation before the next sync). _Pinned by behavior._ On request, the Worker translates
+  what the authenticated owner's extension sends (AUTH-1) and relies on the extension's check: it has no list of its
+  own and does not ask GitHub. The ahead-of-time translation (stage 2, PR 5) reads repositories itself, so it checks
+  their visibility and the owner's list before translating or storing: _Planned (2)._
 - **PRIV-2: only the pull request's title and description are sent.** Comments, reviews, code blocks and everything
   else on the page stay out of the request; inline code, mentions, references and autolinked URLs inside the
   description travel as markers, not as text. _Enforced (main):_ `findTitles` and `findBody` in `src/lib/pr-page.ts`,
@@ -172,7 +183,12 @@ translating comments or review threads, and storing translations anywhere the ow
 ### Resources and cost (RES)
 
 - **RES-1: a request is bounded.** At most 40,000 characters of source text per request, and a 120-second timeout.
-  _Enforced (main):_ `MAX_SOURCE_CHARACTERS` and `sourceTooLong` in `src/lib/translation.ts`, `TIMEOUT_MS` in
+  The Worker's translate route also refuses a body over 256 KiB (`MAX_BODY_BYTES`): a declared length over it before
+  reading, and a stream once it passes it, whatever the declared length; then the body's schema, the choice
+  (`parseChoice`) and the source length are checked before any lookup or provider call. _Enforced (main):_
+  `readJsonBody` in `worker/src/body.ts`, `handleTranslate` in `worker/src/translate.ts`; `worker/src/translate.test.ts`
+  ("RES-1": a declared length and an endless stream over the limit, malformed bodies and choices, and too much text are
+  refused before any provider call or statement). And in the extension: `MAX_SOURCE_CHARACTERS` and `sourceTooLong` in `src/lib/translation.ts`, `TIMEOUT_MS` in
   `src/lib/gemini.ts` and `src/lib/responses.ts`; `src/lib/translation.test.ts` ("RES-1": the limit counts every
   segment), `src/lib/gemini.test.ts` and `src/lib/responses.test.ts` ("RES-1": too much text is refused before any
   request). _Pinned by behavior._ _Gap: the timeout is not exercised by a test._
@@ -181,10 +197,29 @@ translating comments or review threads, and storing translations anywhere the ow
   instead of answering an older provider's translation; callers that ask while the same request is in flight share it; the cache keeps at most 5 MB, newest first, and a
   failed cache write still answers the translation. _Enforced (main):_ `createTranslateService` in
   `src/lib/translate-service.ts`, `store` in `src/lib/cache.ts`; `src/lib/translate-service.test.ts` ("RES-2"). _Pinned
-  by behavior._
+  by behavior._ The Worker stores translations in D1 under the same key (pull request, `hashSegments`, `choiceKey`) and
+  answers a stored one without a provider call; a failed translation is not stored, a failed store still answers, and a
+  row that does not fit the segments is a miss. It keeps one text version per pull request and choice, the one whose
+  request started last: storing a version deletes those requested earlier, and a version requested earlier than one
+  already stored is dropped, in one batch, so a slow translation of older text never replaces newer text. A tab still
+  showing the older text asks again and is translated again. _Enforced (main):_ `createTranslationStore` in
+  `worker/src/translations-db.ts`, `handleTranslate` in `worker/src/translate.ts`, `worker/migrations/`;
+  `worker/src/translate.test.ts` ("RES-2": a miss translates once and stores, a hit does not call the provider, another
+  choice or edited segments translate again, an older version that finishes after a newer one is not stored over it, a
+  provider error is not written). _Gap: two isolates that miss at once
+  both translate; the Worker has no in-flight sharing across isolates._
 - **RES-3: the Worker spends only on authenticated requests, within a budget.** Authentication (AUTH-1) runs before any
   model call or database query; every SQL value is bound; scheduled translations have a daily cap; AI Gateway sets the
-  model budget and rate. _Planned (2)._
+  model budget and rate. _Enforced (main)_ for authentication first and bound values: `createHandler` in
+  `worker/src/handler.ts` routes only after AUTH-1, and every statement in `worker/src/translations-db.ts` is a constant
+  with `?` placeholders run with `bind`; `worker/src/translate.test.ts` ("RES-3": an unauthenticated request, or a
+  refused body, prepares no statement and calls no provider; values with quotes are stored and read back through
+  bound statements). _Pinned by behavior; and by source analysis, forbidden pattern:_
+  `src/lib/source-analysis.test.ts` refuses, under `worker/src`, a `prepare` of anything but an upper-case constant,
+  SQL in a template with `${}` or joined to a value with `+`, and D1's `exec`. The rule is a heuristic over the text,
+  not a parse: an upper-case constant built from a value would pass it, so the behavior tests are the pin and the rule
+  only catches the common shapes. The daily cap for scheduled translations
+  (PR 5) and a model budget: _Planned (2)._
 
 ### Worker access (AUTH)
 
@@ -241,7 +276,7 @@ translating comments or review threads, and storing translations anywhere the ow
 - **A provider client or the prompt:** KEY-2, PRIV-3, RES-1. Check where the key goes and what is sent.
 - **Settings or storage:** KEY-1, RES-2.
 - **Messages between the content script and the background:** MSG-1.
-- **The Worker (2):** AUTH-1, KEY-3, PRIV-1, DOM-3, RES-3.
+- **The Worker (2):** AUTH-1, KEY-2, KEY-3, PRIV-1, DOM-3, RES-1 to RES-3. Keep the Worker's source analysis passing.
 - **The agent, its tools or the wiki (3):** WIKI-1 to WIKI-3, KEY-3, DOM-1 (its output is still a model's output).
 - **A new dependency or workflow:** SUP-1, SUP-2. Prefer a maintained, widely used library over custom security code,
   and record its version, age and license in the PR.

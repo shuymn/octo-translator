@@ -47,15 +47,20 @@ The Worker (stage 2) is a workspace package in `worker/`. It refuses every reque
 token (AUTH-1), so it needs the Access team domain and the application's audience tag even locally.
 
 ```sh
-cp worker/.dev.vars.example worker/.dev.vars  # fill in the Access settings (git-ignored)
+cp worker/.dev.vars.example worker/.dev.vars  # fill in the Access settings, and provider keys if wanted (git-ignored)
+pnpm --filter octo-translator-worker exec wrangler d1 migrations apply DB --local  # create the local database
 pnpm --filter octo-translator-worker run dev       # wrangler dev, local only
 pnpm --filter octo-translator-worker run test      # Vitest in the Workers runtime
-pnpm --filter octo-translator-worker run typecheck # checks the generated types are current, then TypeScript
-pnpm --filter octo-translator-worker run types     # regenerate worker-configuration.d.ts after changing wrangler.jsonc
+pnpm --filter octo-translator-worker run typecheck # TypeScript, with the bindings declared in worker/src/env.d.ts
 ```
 
 Locally, requests do not pass through Access, so `wrangler dev` answers 401 unless a request carries a token the
-configured team signed.
+configured team signed. `POST /v1/translate` takes `{ key: "owner/repo#1", segments: [...], choice? }` and answers the
+extension's `TranslationResult`; a provider without a key in `.dev.vars` answers `no-api-key`.
+
+The configuration names the D1 database but holds no database ID: deploying provisions the database and writes its ID
+into `worker/wrangler.jsonc`, a change to keep out of commits. The tests use their own local database with the
+migrations applied, and bind their own Access settings and empty provider keys, so `.dev.vars` never reaches them.
 
 The GitHub repository settings are declared in `.github/infra.yaml`; review them with `gh infra plan` and apply them
 with `gh infra apply`.

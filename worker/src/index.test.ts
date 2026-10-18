@@ -66,6 +66,16 @@ describe("AUTH-1: the entry point", () => {
     });
   });
 
+  // The test configuration binds every provider key empty, so the route reaches D1 and stops before any provider.
+  test("routes a translation to D1 and the Worker's keys", async () => {
+    const headers = new Headers({ [ACCESS_JWT_HEADER]: await keys.sign() });
+    const body = JSON.stringify({ key: "owner/repo#1", segments: [{ kind: "title", text: "Add cache cleanup" }] });
+    const response = await exports.default.fetch(
+      new Request("https://worker.example/v1/translate", { method: "POST", headers, body }),
+    );
+    expect(await answer(response)).toEqual({ status: 200, body: { ok: false, code: "no-api-key" } });
+  });
+
   test("fetched only the team's certs URL", () => {
     expect(fetched.length).toBeGreaterThan(0);
     expect(new Set(fetched)).toEqual(new Set([TEST_CERTS_URL]));
