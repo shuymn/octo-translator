@@ -1,0 +1,7 @@
+# Wait three days (in minutes), matching the minimumReleaseAge of the shared Renovate preset.
+minimumReleaseAge: 4320
+
+# The platform binaries come from optionalDependencies, so the install scripts are not needed.
+allowBuilds:
+  esbuild: false
+  lefthook: false

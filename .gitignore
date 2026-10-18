@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Package manager
+.pnpm-store/
+.pnpm-debug.log*
+
+# WXT output and generated types
+.output/
+.wxt/
+stats.html
+stats-*.json
+web-ext.config.ts
+
+# Test and coverage output
+coverage/
+
+# Logs
+npm-debug.log*
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# OS and editor noise
+.DS_Store
+*.tsbuildinfo
