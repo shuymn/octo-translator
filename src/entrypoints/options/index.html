@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Octo Translator の設定</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Octo Translator の設定</h1>
+      <form id="settings" novalidate>
+        <div class="field">
+          <label for="api-key">Gemini API キー</label>
+          <input
+            id="api-key"
+            name="apiKey"
+            type="password"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            aria-describedby="api-key-help"
+          />
+          <p id="api-key-help" class="hint">
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Google AI Studio</a>
+            で発行したキーです。このブラウザーにだけ保存され、Gemini API への送信にだけ使います。
+          </p>
+        </div>
+
+        <div class="field checkbox">
+          <input id="auto-translate" name="autoTranslate" type="checkbox" aria-describedby="auto-translate-help" />
+          <label for="auto-translate">プルリクエストを開いたら自動で翻訳する</label>
+          <p id="auto-translate-help" class="hint">
+            オフのときは、本文の上の「日本語に翻訳」を押したときだけ翻訳します。翻訳済みの内容は保存され、本文が変わるまで再度は送りません。
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="private-repositories">翻訳を許可する非公開リポジトリ</label>
+          <textarea
+            id="private-repositories"
+            name="privateRepositories"
+            rows="4"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            placeholder="owner/repo"
+            aria-describedby="private-repositories-help private-repositories-error"
+          ></textarea>
+          <p id="private-repositories-help" class="hint">
+            1 行に 1 つ、<code>owner/repo</code>
+            の形で書きます。無料枠に送った内容は Google
+            の製品改善に使われることがあるため、非公開リポジトリはここに書いたものだけを翻訳します。
+          </p>
+          <p id="private-repositories-error" class="error" aria-live="polite"></p>
+        </div>
+
+        <button type="submit">保存する</button>
+        <p id="status" role="status"></p>
+      </form>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
