@@ -10,13 +10,15 @@ import {
   THINKING_LEVELS,
   withModel,
   type ModelChoice,
+  type Provider,
 } from "../../lib/providers.ts";
-import { editedKeys, type Keys } from "../../lib/key-edits.ts";
+import { trackEdits } from "../../lib/edits.ts";
 import { parseRepositoryList } from "../../lib/repositories.ts";
 import { autoTranslateItem, modelChoiceItem, privateRepositoriesItem } from "../../lib/settings.ts";
-import { originPattern, storedAccess } from "../../lib/worker-client.ts";
+import { originPattern, storedAccess, type WorkerAccess } from "../../lib/worker-client.ts";
 import {
-  planWorkerSave,
+  normalizeWorkerForm,
+  parseWorkerForm,
   storeWorker,
   workerForm,
   type WorkerForm,
@@ -56,18 +58,37 @@ const WORKER_ERROR_MESSAGES: Record<WorkerFormError, string> = {
   "missing-token": "Worker を使うにはサービストークンの両方が必要です。",
 };
 
-// The keys as loaded or last saved, and as typed for each provider (kept while another provider is selected).
-let loadedKeys: Keys = {
+type Keys = Record<Provider, string>;
+
+const writeKey = (id: Provider) => (value: string) => apiKeyItems[id].setValue(value);
+
+// The keys as typed for each provider (kept while another provider is selected).
+const keys: Keys = {
   deepseek: await apiKeyItems.deepseek.getValue(),
   openai: await apiKeyItems.openai.getValue(),
   gemini: await apiKeyItems.gemini.getValue(),
 };
-const keys: Keys = { ...loadedKeys };
 let choice = resolveChoice(await modelChoiceItem.getValue());
 autoTranslate.checked = await autoTranslateItem.getValue();
-repositories.value = (await privateRepositoriesItem.getValue()).join("\n");
-// The Worker section as loaded or last saved; it is written only when edited here (`planWorkerSave`).
-let loadedWorker = workerForm(storedAccess(await workerAccessItem.getValue()) ?? null);
+const loadedRepositories = await privateRepositoriesItem.getValue();
+repositories.value = loadedRepositories.join("\n");
+const loadedWorker = workerForm(storedAccess(await workerAccessItem.getValue()) ?? null);
+
+// Every setting this page writes, as loaded. Saving writes only those edited here (`trackEdits`).
+type Values = Keys & {
+  modelChoice: ModelChoice;
+  autoTranslate: boolean;
+  privateRepositories: string[];
+  worker: WorkerForm;
+};
+const edits = trackEdits<Values>({
+  ...keys,
+  modelChoice: choice,
+  autoTranslate: autoTranslate.checked,
+  privateRepositories: loadedRepositories,
+  worker: loadedWorker,
+});
+
 function showWorker(values: WorkerForm) {
   workerUrl.value = values.url;
   workerClientId.value = values.clientId;
@@ -192,45 +213,53 @@ form.addEventListener("submit", async (event) => {
     return;
   }
   showRepositoriesError("");
-  const worker = planWorkerSave(loadedWorker, currentWorker());
-  if (worker.kind === "invalid") {
-    const inputs = worker.fields.map((name) => workerInputs[name]);
-    showWorkerError(WORKER_ERROR_MESSAGES[worker.code], inputs);
-    inputs[0]?.focus();
-    return;
-  }
-  // The first await of the handler: Chrome asks only inside the click's user gesture.
-  if (worker.kind === "save" && worker.access !== null && !(await requestOrigin(worker.access.origin))) {
-    showWorkerError("この URL への接続が許可されなかったため、保存しませんでした。", [workerUrl]);
-    workerUrl.focus();
-    return;
+  // Each setting as it would be stored; only those that differ from what this page loaded or last saved are written.
+  const changes = edits.edited({
+    deepseek: keys.deepseek.trim(),
+    openai: keys.openai.trim(),
+    gemini: keys.gemini.trim(),
+    modelChoice: selected.choice,
+    autoTranslate: autoTranslate.checked,
+    privateRepositories: parsed.repositories,
+    worker: normalizeWorkerForm(currentWorker()),
+  });
+  // The Worker section is checked, and its origin asked for, only when it was edited here.
+  let workerAccess: WorkerAccess | null = null;
+  if (changes.worker !== undefined) {
+    const worker = parseWorkerForm(changes.worker);
+    if (!worker.ok) {
+      const inputs = worker.fields.map((name) => workerInputs[name]);
+      showWorkerError(WORKER_ERROR_MESSAGES[worker.code], inputs);
+      inputs[0]?.focus();
+      return;
+    }
+    workerAccess = worker.access;
+    // The first await of the handler: Chrome asks only inside the click's user gesture.
+    if (workerAccess !== null && !(await requestOrigin(workerAccess.origin))) {
+      showWorkerError("この URL への接続が許可されなかったため、保存しませんでした。", [workerUrl]);
+      workerUrl.focus();
+      return;
+    }
   }
   showWorkerError("");
-  const edited = editedKeys(loadedKeys, keys);
-  await Promise.all([
-    // Only the keys changed here: another options page may have saved the others since this one loaded.
-    ...PROVIDERS.map((id) => {
-      const value = edited[id];
-      return value === undefined ? undefined : apiKeyItems[id].setValue(value);
-    }),
-    modelChoiceItem.setValue(selected.choice),
-    autoTranslateItem.setValue(autoTranslate.checked),
-    privateRepositoriesItem.setValue(parsed.repositories),
-    worker.kind === "save"
-      ? storeWorker(worker.access, {
-          getStored: () => workerAccessItem.getValue(),
-          setStored: (access) => workerAccessItem.setValue(access),
-          removePermission: (origins) => browser.permissions.remove({ origins }),
-        })
-      : undefined,
-  ]);
-  Object.assign(keys, edited);
-  loadedKeys = { ...keys };
+  await edits.save(changes, {
+    deepseek: writeKey("deepseek"),
+    openai: writeKey("openai"),
+    gemini: writeKey("gemini"),
+    modelChoice: (value) => modelChoiceItem.setValue(value),
+    autoTranslate: (value) => autoTranslateItem.setValue(value),
+    privateRepositories: (value) => privateRepositoriesItem.setValue(value),
+    // One item, written whole, then the replaced origin's permission dropped.
+    worker: () =>
+      storeWorker(workerAccess, {
+        getStored: () => workerAccessItem.getValue(),
+        setStored: (access) => workerAccessItem.setValue(access),
+        removePermission: (origins) => browser.permissions.remove({ origins }),
+      }),
+  });
+  for (const id of PROVIDERS) keys[id] = keys[id].trim();
   apiKey.value = keys[choice.provider];
   repositories.value = parsed.repositories.join("\n");
-  if (worker.kind === "save") {
-    loadedWorker = workerForm(worker.access);
-    showWorker(loadedWorker);
-  }
+  if (changes.worker !== undefined) showWorker(changes.worker);
   status.textContent = "保存しました。";
 });

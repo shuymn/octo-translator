@@ -1,31 +1,35 @@
 import { originPattern, parseWorkerUrl, storedOrigin, type WorkerAccess } from "./worker-client.ts";
 
-// The Worker section of the options page, as loaded or last saved and as typed.
+// The Worker section of the options page, as typed or as a stored configuration shows in it.
 export type WorkerForm = { url: string; clientId: string; clientSecret: string };
-const WORKER_FORM_FIELDS = ["url", "clientId", "clientSecret"] as const satisfies readonly (keyof WorkerForm)[];
 
 export const WORKER_FORM_ERRORS = ["bad-url", "missing-token"] as const;
 export type WorkerFormError = (typeof WORKER_FORM_ERRORS)[number];
 
-// What saving the page does with the Worker. Only a page that edited the section writes it: an options page opened
-// before another one saved a Worker would otherwise put its old (or empty) configuration back and drop the newer
-// origin's permission. Synchronous, so the permission request that follows still runs inside the save click.
-export type WorkerPlan =
-  | { kind: "keep" }
-  | { kind: "invalid"; code: WorkerFormError; fields: (keyof WorkerForm)[] }
-  | { kind: "save"; access: WorkerAccess | null };
+export type ParsedWorkerForm =
+  | { ok: true; access: WorkerAccess | null }
+  | { ok: false; code: WorkerFormError; fields: (keyof WorkerForm)[] };
 
-export function planWorkerSave(loaded: WorkerForm, current: WorkerForm): WorkerPlan {
-  if (WORKER_FORM_FIELDS.every((name) => loaded[name] === current[name])) return { kind: "keep" };
-  // An empty URL turns the Worker off; its token goes with it.
-  if (current.url.trim() === "") return { kind: "save", access: null };
-  const url = parseWorkerUrl(current.url);
-  if (!url.ok) return { kind: "invalid", code: "bad-url", fields: ["url"] };
-  const clientId = current.clientId.trim();
-  const clientSecret = current.clientSecret.trim();
-  const missing = (["clientId", "clientSecret"] as const).filter((name) => current[name].trim() === "");
-  if (missing.length > 0) return { kind: "invalid", code: "missing-token", fields: missing };
-  return { kind: "save", access: { origin: url.origin, clientId, clientSecret } };
+// The configuration the section asks for: none (an empty URL turns the Worker off, and its token goes with it), or an
+// https origin with both halves of the token. Synchronous, so the permission request that follows still runs inside
+// the save click.
+export function parseWorkerForm(form: WorkerForm): ParsedWorkerForm {
+  if (form.url.trim() === "") return { ok: true, access: null };
+  const url = parseWorkerUrl(form.url);
+  if (!url.ok) return { ok: false, code: "bad-url", fields: ["url"] };
+  const missing = (["clientId", "clientSecret"] as const).filter((name) => form[name].trim() === "");
+  if (missing.length > 0) return { ok: false, code: "missing-token", fields: missing };
+  return {
+    ok: true,
+    access: { origin: url.origin, clientId: form.clientId.trim(), clientSecret: form.clientSecret.trim() },
+  };
+}
+
+// The section as it would be stored, so the options page compares it with the stored one (`trackEdits`): a valid form
+// becomes the form of its configuration, and an invalid one stays as typed, which differs and is refused on save.
+export function normalizeWorkerForm(form: WorkerForm): WorkerForm {
+  const parsed = parseWorkerForm(form);
+  return parsed.ok ? workerForm(parsed.access) : form;
 }
 
 export type WorkerStoreDeps = {

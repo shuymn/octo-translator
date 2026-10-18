@@ -215,13 +215,15 @@ translating comments or review threads, and storing translations anywhere the ow
   without a local call. _Enforced (main):_
   `parseWorkerUrl`, `resolveWorker`, `translateWithWorker` and `WORKER_FAILURE_HANDLING` in `src/lib/worker-client.ts`,
   `createTranslateService` in `src/lib/translate-service.ts`, wired in `src/entrypoints/background.ts`;
-  `workerAccessItem` in `src/lib/api-keys.ts`; `planWorkerSave` and `storeWorker` in `src/lib/worker-edits.ts`, used
-  by `src/entrypoints/options/main.ts` with the permission request; `optional_host_permissions` in `wxt.config.ts`;
+  `workerAccessItem` in `src/lib/api-keys.ts`; `trackEdits` in `src/lib/edits.ts` and `parseWorkerForm` and `storeWorker` in
+  `src/lib/worker-edits.ts`, used by `src/entrypoints/options/main.ts` with the permission request; `optional_host_permissions` in `wxt.config.ts`;
   `src/lib/worker-client.test.ts` ("KEY-4": the URL, the headers, a body without the token, `redirect: "manual"`, each
   status, a redirect, a timeout, a body cut off and malformed answers; the URLs accepted and refused; an origin
   always paired with its own token while the configuration changes; an unusable setting),
-  `src/lib/worker-edits.test.ts` (a stale page's unrelated save leaves a newer configuration and its permission
-  intact; a replaced origin's permission is dropped) and
+  `src/lib/options-page.test.ts` ("KEY-4": the options page, run on WXT's fake browser: a stale page's unrelated save
+  leaves a newer configuration and its permission intact, an edited configuration asks for its origin and is saved,
+  a cleared URL drops the configuration and its permission), `src/lib/worker-edits.test.ts` ("KEY-4": a replaced
+  origin's permission is dropped) and
   `src/lib/translate-service.test.ts` ("KEY-4": a Worker hit reads no provider key; 5xx and network failures, also while the body is
   read, fall back; refusals, 429 included, and a malformed body do not; no local key answers the Worker failure). _Pinned by behavior._ _Gap: the options page's
   permission request runs only in Chrome, inside the save click; no test drives it. Two pages saving the Worker at
