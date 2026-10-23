@@ -10,3 +10,6 @@ allowBuilds:
   esbuild: false
   lefthook: false
   workerd: false
+minimumReleaseAgeExclude:
+  # Renovate security update: happy-dom@21.0.4
+  - happy-dom@21.0.4
