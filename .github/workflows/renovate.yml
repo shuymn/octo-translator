@@ -18,4 +18,4 @@ jobs:
   validate:
     permissions:
       contents: read
-    uses: shuymn/github-actions/.github/workflows/renovate.yml@ff6f722debd290fefec5482603fe74ea850ec145 # main
+    uses: shuymn/github-actions/.github/workflows/renovate.yml@58e6e5cd9d330679dc5c694cd2a44b5f728b65c2 # main
